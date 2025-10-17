@@ -1,0 +1,772 @@
+import { eq, and, or, desc, lte, inArray, gte } from "drizzle-orm";
+import { getDatabase } from "../db/connection.js";
+import {
+  transactions,
+  users,
+  type Transaction,
+  type NewTransaction,
+} from "../db/schema.js";
+import { TransactionType, TransactionStatus } from "../shared/types.js";
+
+export class PostgresTransactionService {
+  // Create a new transaction
+  async createTransaction(
+    transactionData: Partial<
+      Omit<NewTransaction, "id" | "createdAt" | "updatedAt" | "transactionId">
+    >
+  ): Promise<string> {
+    // Set defaults for null/undefined fields
+    const defaultedData = this.setTransactionDefaults(transactionData);
+
+    const db = getDatabase();
+    const [result] = await db
+      .insert(transactions)
+      .values({
+        ...defaultedData,
+        transactionId: this.generateTransactionId(),
+        expiredAt: new Date(Date.now() + 20 * 60 * 1000), // 20 minutes
+      })
+      .returning({ id: transactions.id });
+
+    return result.id;
+  }
+
+  // Validate required fields
+  private validateRequiredFields(
+    data: Partial<
+      Omit<NewTransaction, "id" | "createdAt" | "updatedAt" | "transactionId">
+    >
+  ): void {
+    const requiredFields = [
+      "transactionType",
+      "userId",
+      "sourceAmount",
+      "sourceCurrency",
+      "destinationAmount",
+      "destinationCurrency",
+      "exchangeRate",
+      "netAmount",
+    ] as const;
+
+    const missingFields = requiredFields.filter((field) => !data[field]);
+
+    if (missingFields.length > 0) {
+      throw new Error(`Missing required fields: ${missingFields.join(", ")}`);
+    }
+  }
+
+  // Set defaults for transaction fields
+  private setTransactionDefaults(
+    data: Partial<
+      Omit<NewTransaction, "id" | "createdAt" | "updatedAt" | "transactionId">
+    >
+  ): Omit<NewTransaction, "id" | "createdAt" | "updatedAt" | "transactionId"> {
+    // Validate required fields first
+    this.validateRequiredFields(data);
+    return {
+      // Required fields - must be provided
+      transactionType: data.transactionType!,
+      userId: data.userId!,
+      sourceAmount: data.sourceAmount!,
+      sourceCurrency: data.sourceCurrency!,
+      destinationAmount: data.destinationAmount!,
+      destinationCurrency: data.destinationCurrency!,
+      exchangeRate: data.exchangeRate!,
+      netAmount: data.netAmount!,
+
+      // Optional fields with defaults
+      userEmail: data.userEmail || null,
+      userName: data.userName || null,
+      sourceChain: data.sourceChain || null,
+      destinationChain: data.destinationChain || null,
+      sourceAddress: data.sourceAddress || null,
+      sourceBankAccountNumber: data.sourceBankAccountNumber || null,
+      sourceBankName: data.sourceBankName || null,
+      sourceBankCode: data.sourceBankCode || null,
+      sourceBankAccountName: data.sourceBankAccountName || null,
+      destinationAddress: data.destinationAddress || null,
+      destinationBankAccountNumber: data.destinationBankAccountNumber || null,
+      destinationBankName: data.destinationBankName || null,
+      destinationBankCode: data.destinationBankCode || null,
+      destinationAccountName: data.destinationAccountName || null,
+
+      // Financial fields with defaults
+      feeAmount: data.feeAmount || "0",
+      feePercentage: data.feePercentage || "0.03",
+
+      // Status fields with defaults
+      status: data.status || "pending",
+      cryptoStatus: data.cryptoStatus || "waiting_for_crypto",
+      fiatStatus: data.fiatStatus || null,
+
+      // Timestamp fields - all null by default
+      cryptoReceivedAt: data.cryptoReceivedAt || null,
+      cryptoSentAt: data.cryptoSentAt || null,
+      fiatReceivedAt: data.fiatReceivedAt || null,
+      fiatSentAt: data.fiatSentAt || null,
+      completedAt: data.completedAt || null,
+      expiredAt: data.expiredAt || null,
+
+      // Transaction hash fields
+      sourceTransactionHash: data.sourceTransactionHash || null,
+      destinationTransactionHash: data.destinationTransactionHash || null,
+
+      // Notes fields
+      notes: data.notes || null,
+      adminNotes: data.adminNotes || null,
+      userNotes: data.userNotes || null,
+
+      // Additional optional fields
+      estimatedProcessingTime: data.estimatedProcessingTime || null,
+      slippageTolerance: data.slippageTolerance || null,
+      gasFee: data.gasFee || null,
+      networkFee: data.networkFee || null,
+    };
+  }
+
+  // Get transaction by ID
+  async getTransactionById(id: string): Promise<Transaction | null> {
+    const db = getDatabase();
+    const [result] = await db
+      .select()
+      .from(transactions)
+      .where(eq(transactions.id, id));
+    return result || null;
+  }
+
+  // Get transaction by transaction ID
+  async getTransactionByTransactionId(
+    transactionId: string
+  ): Promise<Transaction | null> {
+    const db = getDatabase();
+    const [result] = await db
+      .select()
+      .from(transactions)
+      .where(eq(transactions.transactionId, transactionId));
+    return result || null;
+  }
+
+  // Get transactions by user ID
+  async getTransactionsByUserId(
+    userId: number,
+    limit: number = 50
+  ): Promise<Transaction[]> {
+    const db = getDatabase();
+    return await db
+      .select()
+      .from(transactions)
+      .where(eq(transactions.userId, userId))
+      .orderBy(desc(transactions.createdAt))
+      .limit(limit);
+  }
+
+  // Get transactions by type
+  async getTransactionsByType(type: TransactionType): Promise<Transaction[]> {
+    const db = getDatabase();
+    return await db
+      .select()
+      .from(transactions)
+      .where(eq(transactions.transactionType, type));
+  }
+
+  // Get pending crypto transactions
+  async getPendingCryptoTransactions(): Promise<Transaction[]> {
+    const db = getDatabase();
+    return await db
+      .select()
+      .from(transactions)
+      .where(
+        and(
+          inArray(transactions.cryptoStatus, [
+            "waiting_for_crypto",
+            "crypto_pending",
+          ])
+          // Only include transactions with source addresses
+          // Note: In Drizzle, we need to handle null checks differently
+        )
+      );
+  }
+
+  // Update crypto status
+  async updateCryptoStatus(
+    id: string,
+    status: TransactionStatus,
+    txHash?: string
+  ): Promise<boolean> {
+    const updates: any = {
+      cryptoStatus: status,
+      updatedAt: new Date(),
+    };
+
+    if (status === "crypto_confirmed") {
+      updates.cryptoReceivedAt = new Date();
+      if (txHash) updates.sourceTransactionHash = txHash;
+
+      // Get the transaction to determine its type
+      const transaction = await this.getTransactionById(id);
+      if (transaction) {
+        // Update overall status based on transaction type (matching original Mongoose behavior)
+        switch (transaction.transactionType) {
+          case "crypto_to_fiat":
+            updates.status = "processing_payout";
+            updates.fiatStatus = "processing_payout";
+            break;
+          case "crypto_to_crypto":
+          case "supply_stable":
+            updates.status = "processing";
+            break;
+          case "fiat_to_crypto":
+            updates.status = "processing";
+            break;
+        }
+      }
+    }
+
+    const db = getDatabase();
+    const [result] = await db
+      .update(transactions)
+      .set(updates)
+      .where(eq(transactions.id, id))
+      .returning({ id: transactions.id });
+
+    return !!result;
+  }
+
+  // Update fiat status
+  async updateFiatStatus(
+    id: string,
+    status: TransactionStatus,
+    txId?: string
+  ): Promise<boolean> {
+    const updates: any = {
+      fiatStatus: status,
+      updatedAt: new Date(),
+    };
+
+    if (status === "fiat_confirmed") {
+      updates.fiatReceivedAt = new Date();
+      if (txId) updates.sourceTransactionHash = txId;
+      updates.status = "processing";
+    } else if (status === "processing_payout") {
+      updates.fiatSentAt = new Date();
+      if (txId) updates.destinationTransactionHash = txId;
+      updates.status = "completed";
+      updates.completedAt = new Date();
+    }
+
+    const db = getDatabase();
+    const [result] = await db
+      .update(transactions)
+      .set(updates)
+      .where(eq(transactions.id, id))
+      .returning({ id: transactions.id });
+
+    return !!result;
+  }
+
+  async updateFiatStatusByTransactionHash(
+    id: string,
+    status: TransactionStatus,
+    sourceTransactionHash: string
+  ): Promise<boolean> {
+    try {
+      const db = getDatabase();
+      const [result] = await db
+        .update(transactions)
+        .set({
+          sourceTransactionHash,
+          fiatStatus: status,
+          fiatReceivedAt: status === "fiat_confirmed" ? new Date() : undefined,
+          status: status === "fiat_confirmed" ? "processing" : undefined,
+          updatedAt: new Date(),
+        })
+        .where(eq(transactions.id, id))
+        .returning({ id: transactions.id });
+
+      return !!result;
+    } catch (error: any) {
+      if (error.code === "23505") {
+        // PostgreSQL unique violation
+        console.log(`Duplicate transaction hash: ${sourceTransactionHash}`);
+        return false;
+      }
+      throw error;
+    }
+  }
+
+  // Complete crypto-to-crypto transaction
+  async completeCryptoToCrypto(
+    id: string,
+    destinationTxHash: string,
+    adminNotes?: string
+  ): Promise<boolean> {
+    const db = getDatabase();
+    const [result] = await db
+      .update(transactions)
+      .set({
+        destinationTransactionHash: destinationTxHash,
+        cryptoSentAt: new Date(),
+        status: "completed",
+        completedAt: new Date(),
+        adminNotes: adminNotes || null,
+        updatedAt: new Date(),
+      })
+      .where(eq(transactions.id, id))
+      .returning({ id: transactions.id });
+
+    return !!result;
+  }
+
+  // Expire transaction
+  async expireTransaction(id: string): Promise<boolean> {
+    const db = getDatabase();
+    const [result] = await db
+      .update(transactions)
+      .set({
+        status: "expired",
+        expiredAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(transactions.id, id))
+      .returning({ id: transactions.id });
+
+    return !!result;
+  }
+
+  // Find expired transactions
+  async findExpiredTransactions(): Promise<Transaction[]> {
+    const now = new Date();
+
+    const db = getDatabase();
+
+    return await db
+      .select()
+      .from(transactions)
+      .where(
+        and(
+          inArray(transactions.status, [
+            "waiting_for_crypto",
+            "waiting_for_fiat",
+            "crypto_pending",
+            "fiat_pending",
+            "pending",
+          ]),
+          lte(transactions.expiredAt, now)
+        )
+      );
+  }
+
+  // Expire old transactions
+  async expireOldTransactions(): Promise<number> {
+    const expiredTransactions = await this.findExpiredTransactions();
+
+    if (expiredTransactions.length === 0) return 0;
+
+    const expiredIds = expiredTransactions.map((tx) => tx.id);
+
+    const db = getDatabase();
+
+    await db
+      .update(transactions)
+      .set({
+        status: "expired",
+        cryptoStatus: "expired",
+        fiatStatus: "expired",
+        expiredAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(inArray(transactions.id, expiredIds));
+
+    return expiredTransactions.length;
+  }
+
+  // Update transaction status
+  async updateTransactionStatus(
+    id: string,
+    status: TransactionStatus
+  ): Promise<boolean> {
+    const db = getDatabase();
+
+    const [result] = await db
+      .update(transactions)
+      .set({
+        status,
+        updatedAt: new Date(),
+      })
+      .where(eq(transactions.id, id))
+      .returning({ id: transactions.id });
+
+    return !!result;
+  }
+
+  // Helper method to create crypto-to-crypto transaction with minimal data
+  async createCryptoToCryptoTransaction(params: {
+    userId: number;
+    sourceChain: string;
+    destinationChain: string;
+    sourceAmount: string;
+    sourceCurrency: string;
+    sourceAddress: string;
+    destinationAmount: string;
+    destinationCurrency: string;
+    destinationAddress: string;
+    exchangeRate: string;
+    feeAmount?: string;
+    netAmount: string;
+    userEmail?: string;
+    userName?: string;
+    tokenMint?: string;
+  }): Promise<string> {
+    const transactionData = {
+      transactionType: TransactionType.CRYPTO_TO_CRYPTO,
+      userId: params.userId,
+      userEmail: params.userEmail,
+      userName: params.userName,
+      sourceChain: params.sourceChain.toLowerCase(),
+      destinationChain: params.destinationChain.toLowerCase(),
+      sourceAmount: params.sourceAmount,
+      sourceCurrency: params.sourceCurrency.toUpperCase(),
+      sourceAddress: params.sourceAddress,
+      destinationAmount: params.destinationAmount,
+      destinationCurrency: params.destinationCurrency.toUpperCase(),
+      destinationAddress: params.destinationAddress,
+      exchangeRate: params.exchangeRate,
+      feeAmount: params.feeAmount || "0",
+      netAmount: params.netAmount,
+      tokenMint: params.tokenMint,
+      cryptoStatus: "waiting_for_crypto" as TransactionStatus,
+    };
+
+    return await this.createTransaction(transactionData);
+  }
+
+  // Helper method to create crypto-to-fiat transaction
+  async createCryptoToFiatTransaction(params: {
+    userId: number;
+    sourceChain: string;
+    sourceAmount: string;
+    sourceCurrency: string;
+    sourceAddress: string;
+    destinationAmount: string;
+    destinationCurrency: string;
+    destinationBankAccountNumber: string;
+    destinationBankName: string;
+    destinationChain: string;
+    destinationBankCode: string;
+    destinationAccountName: string;
+    exchangeRate: string;
+    feeAmount?: string;
+    netAmount: string;
+    userEmail?: string;
+    userName?: string;
+  }): Promise<string> {
+    const transactionData = {
+      transactionType: TransactionType.CRYPTO_TO_FIAT,
+      userId: params.userId,
+      userEmail: params.userEmail,
+      userName: params.userName,
+      sourceChain: params.sourceChain.toLowerCase(),
+      sourceAmount: params.sourceAmount,
+      sourceCurrency: params.sourceCurrency.toUpperCase(),
+      sourceAddress: params.sourceAddress,
+      destinationAmount: params.destinationAmount,
+      destinationCurrency: params.destinationCurrency.toUpperCase(),
+      destinationChain: params.destinationChain,
+      destinationBankAccountNumber: params.destinationBankAccountNumber,
+      destinationBankName: params.destinationBankName,
+      destinationBankCode: params.destinationBankCode,
+      destinationAccountName: params.destinationAccountName,
+      exchangeRate: params.exchangeRate,
+      feeAmount: params.feeAmount || "0",
+      netAmount: params.netAmount,
+      cryptoStatus: TransactionStatus.WAITING_FOR_CRYPTO,
+    };
+
+    return await this.createTransaction(transactionData);
+  }
+
+  // Helper method to create fiat-to-crypto transaction
+  async createFiatToCryptoTransaction(params: {
+    userId: number;
+    sourceAmount: string;
+    sourceCurrency: string;
+    sourceBankAccountNumber: string;
+    sourceBankName: string;
+    sourceBankAccountName: string;
+    destinationChain: string;
+    destinationAmount: string;
+    destinationCurrency: string;
+    destinationAddress: string;
+    exchangeRate: string;
+    feeAmount?: string;
+    netAmount: string;
+    userEmail?: string;
+    userName?: string;
+    sourceChain: string;
+  }): Promise<string> {
+    const transactionData = {
+      transactionType: TransactionType.FIAT_TO_CRYPTO,
+      userId: params.userId,
+      userEmail: params.userEmail,
+      userName: params.userName,
+      destinationChain: params.destinationChain.toLowerCase(),
+      sourceAmount: params.sourceAmount,
+      sourceCurrency: params.sourceCurrency.toUpperCase(),
+      sourceChain: params.sourceChain,
+      sourceBankAccountNumber: params.sourceBankAccountNumber,
+      sourceBankName: params.sourceBankName,
+      sourceBankAccountName: params.sourceBankAccountName,
+      destinationAmount: params.destinationAmount,
+      destinationCurrency: params.destinationCurrency.toUpperCase(),
+      destinationAddress: params.destinationAddress,
+      exchangeRate: params.exchangeRate,
+      feeAmount: params.feeAmount || "0",
+      netAmount: params.netAmount,
+      fiatStatus: TransactionStatus.WAITING_FOR_FIAT,
+    };
+
+    return await this.createTransaction(transactionData);
+  }
+
+  // Generate transaction ID (same logic as Mongoose)
+  private generateTransactionId(): string {
+    const timestamp = Date.now().toString(36);
+    const random = Math.random().toString(36).substring(2, 8);
+    return `TXN${timestamp}${random}`.toUpperCase();
+  }
+
+  // Get transactions by chain and address
+  async getTransactionsByChainAndAddress(
+    chain: string,
+    address: string
+  ): Promise<Transaction[]> {
+    const db = getDatabase();
+
+    return await db
+      .select()
+      .from(transactions)
+      .where(
+        and(
+          eq(transactions.sourceChain, chain),
+          eq(transactions.sourceAddress, address)
+        )
+      )
+      .orderBy(desc(transactions.createdAt));
+  }
+
+  // Get pending transactions by chain
+  async getPendingTransactionsByChain(chain: string): Promise<Transaction[]> {
+    const now = new Date();
+
+    const db = getDatabase();
+
+    return await db
+      .select()
+      .from(transactions)
+      .where(
+        and(
+          eq(transactions.sourceChain, chain),
+          inArray(transactions.cryptoStatus, [
+            "waiting_for_crypto",
+            "crypto_pending",
+          ]),
+          inArray(transactions.status, ["pending", "processing"]),
+          // Not expired - expiredAt should be greater than now
+          gte(transactions.expiredAt, now)
+        )
+      )
+      .orderBy(transactions.createdAt);
+  }
+
+  // Get pending transactions by chain and address
+  async getPendingTransactionsByChainAndAddress(
+    chain: string,
+    address: string
+  ): Promise<Transaction[]> {
+    const now = new Date();
+
+    const db = getDatabase();
+
+    return await db
+      .select()
+      .from(transactions)
+      .where(
+        and(
+          eq(transactions.sourceChain, chain),
+          eq(transactions.sourceAddress, address),
+          eq(transactions.cryptoStatus, "waiting_for_crypto"),
+          inArray(transactions.status, ["pending", "processing"]),
+          // Not expired - expiredAt should be greater than now
+          gte(transactions.expiredAt, now)
+        )
+      )
+      .orderBy(transactions.createdAt); // Oldest first
+  }
+
+  // Get pending transaction by chain and email
+  async getPendingTransactionsByChainAndEmail(
+    chain: string,
+    email: string
+  ): Promise<Transaction[]> {
+    const now = new Date();
+
+    const db = getDatabase();
+
+    return await db
+      .select()
+      .from(transactions)
+      .where(
+        and(
+          eq(transactions.sourceChain, chain),
+          eq(transactions.userEmail, email),
+          eq(transactions.fiatStatus, "waiting_for_fiat"),
+          inArray(transactions.status, ["pending", "processing"]),
+          // Not expired - expiredAt should be greater than now
+          gte(transactions.expiredAt, now)
+        )
+      )
+      .orderBy(transactions.createdAt); // Oldest first
+  }
+
+  // Get expired transactions by chain and address
+  async getExpiredTransactionsByChainAndAddress(
+    chain: string,
+    address: string
+  ): Promise<Transaction[]> {
+    const now = new Date();
+    const db = getDatabase();
+
+    return await db
+      .select()
+      .from(transactions)
+      .where(
+        and(
+          eq(transactions.sourceChain, chain),
+          eq(transactions.sourceAddress, address),
+          or(
+            eq(transactions.status, "expired"),
+            lte(transactions.expiredAt, now)
+          )
+        )
+      );
+  }
+
+  // Update admin notes for a transaction
+  async updateAdminNotes(id: string, adminNotes: string): Promise<boolean> {
+    const db = getDatabase();
+
+    const [result] = await db
+      .update(transactions)
+      .set({
+        adminNotes,
+        updatedAt: new Date(),
+      })
+      .where(eq(transactions.id, id))
+      .returning({ id: transactions.id });
+
+    return !!result;
+  }
+
+  // Update multiple transaction fields at once
+  async updateTransactionFields(
+    id: string,
+    updates: Partial<{
+      status: string;
+      internalTransferStatus: string;
+      cryptoStatus: string;
+      fiatStatus: string;
+      sourceTransactionHash: string;
+      sourceFee: string;
+      destinationTransactionHash: string;
+      destinationFee: string;
+      completedAt: Date;
+      adminNotes: string;
+      cryptoReceivedAt: Date;
+      cryptoSentAt: Date;
+      fiatReceivedAt: Date;
+      fiatSentAt: Date;
+      expiredAt: Date;
+      sweepAdminNotes: string;
+    }>
+  ): Promise<boolean> {
+    const db = getDatabase();
+
+    const [result] = await db
+      .update(transactions)
+      .set({
+        ...updates,
+        updatedAt: new Date(),
+      })
+      .where(eq(transactions.id, id))
+      .returning({ id: transactions.id });
+
+    return !!result;
+  }
+
+  async updateTransactionFieldsByTransactionId(
+    transactionId: string,
+    updates: Partial<{
+      status: string;
+      internalTransferStatus: string;
+      cryptoStatus: string;
+      fiatStatus: string;
+      sourceTransactionHash: string;
+      sourceFee: string;
+      destinationTransactionHash: string;
+      destinationFee: string;
+      completedAt: Date;
+      adminNotes: string;
+      sweepAdminNotes: string;
+      cryptoReceivedAt: Date;
+      cryptoSentAt: Date;
+      fiatReceivedAt: Date;
+      fiatSentAt: Date;
+      expiredAt: Date;
+    }>
+  ): Promise<boolean> {
+    const db = getDatabase();
+
+    const [result] = await db
+      .update(transactions)
+      .set({
+        ...updates,
+        updatedAt: new Date(),
+      })
+      .where(eq(transactions.transactionId, transactionId))
+      .returning({ id: transactions.id });
+
+    return !!result;
+  }
+
+  // Get transaction statistics
+  async getTransactionStats(): Promise<{
+    total: number;
+    pending: number;
+    completed: number;
+    expired: number;
+    failed: number;
+  }> {
+    const db = getDatabase();
+
+    // This would require more complex aggregation queries in Drizzle
+    // For now, we'll do separate queries
+    const [total, pending, completed, expired, failed] = await Promise.all([
+      db.select().from(transactions),
+      db.select().from(transactions).where(eq(transactions.status, "pending")),
+      db
+        .select()
+        .from(transactions)
+        .where(eq(transactions.status, "completed")),
+      db.select().from(transactions).where(eq(transactions.status, "expired")),
+      db.select().from(transactions).where(eq(transactions.status, "failed")),
+    ]);
+
+    return {
+      total: total.length,
+      pending: pending.length,
+      completed: completed.length,
+      expired: expired.length,
+      failed: failed.length,
+    };
+  }
+}

@@ -9,16 +9,14 @@ import cors from "cors";
 import { dbManager, initializeDatabase } from "./db/connection.js";
 
 const app = express();
-const PORT = process.env.PORT || 7000;
-
-app.use(express.json());
+const PORT = process.env.PORT || 3300;
 
 app.use(
   cors({
     origin: (origin, callback) => {
       const allowedOrigins = [
-        "http://localhost:2000",
-        "http://localhost:2100",
+        "*",
+        "http://localhost:7500",
         "https://wiseramp.vercel.app",
       ];
 
@@ -35,6 +33,8 @@ app.use(
     credentials: true,
   })
 );
+
+app.use(express.json());
 
 // Log every endpoint hit (method and URL) - MUST be before routes
 app.use((req: Request, res: Response, next) => {
