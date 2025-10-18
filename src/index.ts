@@ -3,9 +3,10 @@ import dotenv from "dotenv";
 // Load environment variables FIRST, before any other imports
 dotenv.config();
 
+import cors from "cors";
 import express, { Request, Response } from "express";
 import authRouter from "./routes/auth.routes.js";
-import cors from "cors";
+import transactionRoute from "./routes/transaction.routes.js";
 import { dbManager, initializeDatabase } from "./db/connection.js";
 
 const app = express();
@@ -65,6 +66,7 @@ app.use((req: Request, res: Response, next) => {
 })();
 
 app.use("/auth", authRouter);
+app.use("/transaction", transactionRoute);
 
 // Basic route
 app.get("/", (req: Request, res: Response) => {

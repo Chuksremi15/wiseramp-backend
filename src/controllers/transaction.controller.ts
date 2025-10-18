@@ -8,10 +8,12 @@ import { PostgresUserService } from "../services/user.service.js";
 import Decimal from "decimal.js";
 import { HDNodeWallet, Mnemonic } from "ethers";
 import { normalizeAddress } from "../utils/address.js";
+import { AddressWatcherService } from "../services/address-watcher.service.js";
 
 export class TransactionController {
   private static transactionService = new PostgresTransactionService();
   private static useService = new PostgresUserService();
+  private static watchUrl = new AddressWatcherService();
 
   // Validate and parse amount, handling comma separators
   private static validateAndParseAmount(amount: string): number {
@@ -356,6 +358,13 @@ export class TransactionController {
         res.status(400).json({ message: "Unsupported source chain" });
         return;
       }
+
+      await this.watchUrl.addAddressToWatcher({
+        address: sourceAddress,
+        tokenMint,
+        chain: sourceChain,
+        timeoutMs: 30 * 60 * 1000,
+      });
 
       const transactionId =
         await this.transactionService.createCryptoToCryptoTransaction({
