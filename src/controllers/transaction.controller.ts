@@ -1,7 +1,6 @@
 import { Request, Response } from "express";
 import { PostgresTransactionService } from "../services/transaction.service.js";
-import { TransactionStatus, TransactionType } from "../shared/types.js";
-
+import { TransactionStatus } from "../shared/types.js";
 import { getTokenEquivalent, PRICE_FEEDS } from "../utils/price-feed.js";
 import { PostgresUserService } from "../services/user.service.js";
 // import { BankAccountService } from "../services/bank-account.service.js";
@@ -9,14 +8,22 @@ import Decimal from "decimal.js";
 import { HDNodeWallet, Mnemonic } from "ethers";
 import { normalizeAddress } from "../utils/address.js";
 import { AddressWatcherService } from "../services/address-watcher.service.js";
+import { BaseController } from "./base.controller.js";
 
-export class TransactionController {
-  private static transactionService = new PostgresTransactionService();
-  private static useService = new PostgresUserService();
-  private static watchUrl = new AddressWatcherService();
+export class TransactionController extends BaseController {
+  private transactionService: PostgresTransactionService;
+  private userService: PostgresUserService;
+  private watchService: AddressWatcherService;
+
+  constructor() {
+    super();
+    this.transactionService = new PostgresTransactionService();
+    this.userService = new PostgresUserService();
+    this.watchService = new AddressWatcherService();
+  }
 
   // Validate and parse amount, handling comma separators
-  private static validateAndParseAmount(amount: string): number {
+  private validateAndParseAmount(amount: string): number {
     // Remove commas and whitespace
     const cleanAmount = amount.replace(/,/g, "").trim();
     const numericAmount = parseFloat(cleanAmount);
@@ -32,7 +39,7 @@ export class TransactionController {
    * Generates an Ethereum address from the mnemonic in the environment variable.
    * @returns {Promise<string>} The generated Ethereum address.
    */
-  private static async generateEthereumAddressFromMnemonic(
+  private async generateEthereumAddressFromMnemonic(
     userID: number
   ): Promise<string> {
     const mnemonic = process.env.MNEMONIC!;
@@ -44,19 +51,17 @@ export class TransactionController {
   }
 
   // Create a fiat-to-crypto transaction
-  static async createFiatToCryptoTransaction(req: Request, res: Response) {
-    try {
+  createFiatToCryptoTransaction = this.asyncHandler(
+    async (req: Request, res: Response): Promise<Response | void> => {
       if (!req.user) {
-        res.status(401).json({ message: "User not authenticated" });
-        return;
+        return this.sendError(res, "User not authenticated", 401);
       }
       const { id } = req.user;
 
-      const user = await this.useService.findByUserId(id);
+      const user = await this.userService.findByUserId(id);
 
       if (!user) {
-        res.status(404).json({ message: "User not found" });
-        return;
+        return this.sendError(res, "User not found", 404);
       }
 
       const {
@@ -68,28 +73,32 @@ export class TransactionController {
         destinationChain,
       } = req.body;
 
-      if (
-        !sourceAmount ||
-        !sourceCurrency ||
-        !destinationCurrency ||
-        !destinationAddress ||
-        !destinationChain ||
-        !sourceChain ||
-        sourceCurrency !== "NGN"
-      ) {
-        res
-          .status(400)
-          .json({ message: "Missing required fields for fiat-to-crypto" });
-        return;
+      // Validation
+      const validationError = this.validateRequiredFields(req.body, [
+        "sourceAmount",
+        "sourceCurrency",
+        "destinationCurrency",
+        "destinationAddress",
+        "destinationChain",
+        "sourceChain",
+      ]);
+      if (validationError) {
+        return this.sendError(res, validationError);
+      }
+
+      if (sourceCurrency !== "NGN") {
+        return this.sendError(
+          res,
+          "Source currency must be NGN for fiat-to-crypto transactions"
+        );
       }
 
       // Check if user has accounts configured
       if (!user.reserveAccounts || user.reserveAccounts.length === 0) {
-        res.status(400).json({
-          message:
-            "User has no bank accounts configured. Please set up a reserve account first.",
-        });
-        return;
+        return this.sendError(
+          res,
+          "User has no bank accounts configured. Please set up a reserve account first."
+        );
       }
 
       const { accountNumber, bankName, accountName } = user.reserveAccounts[0];
@@ -97,16 +106,14 @@ export class TransactionController {
       // Validate sourceAmount is a valid number
       let numericSourceAmount: number;
       try {
-        numericSourceAmount =
-          TransactionController.validateAndParseAmount(sourceAmount);
+        numericSourceAmount = this.validateAndParseAmount(sourceAmount);
       } catch (error) {
-        res.status(400).json({
-          message:
-            error instanceof Error
-              ? error.message
-              : "Invalid source amount. Must be a positive number.",
-        });
-        return;
+        return this.sendError(
+          res,
+          error instanceof Error
+            ? error.message
+            : "Invalid source amount. Must be a positive number."
+        );
       }
 
       const { destinationEquivalent, exchangeRate } = await getTokenEquivalent(
@@ -146,22 +153,20 @@ export class TransactionController {
         transactionId
       );
 
-      res.status(201).json({
-        success: true,
-        transaction,
-      });
-    } catch (error) {
-      console.error("Error creating fiat-to-crypto transaction:", error);
-      res.status(500).json({ message: "Internal server error" });
+      return this.sendSuccess(
+        res,
+        { transaction },
+        "Fiat-to-crypto transaction created successfully",
+        201
+      );
     }
-  }
+  );
 
   // Create a crypto-to-fiat transaction
-  static async createCryptoToFiatTransaction(req: Request, res: Response) {
-    try {
+  createCryptoToFiatTransaction = this.asyncHandler(
+    async (req: Request, res: Response): Promise<Response | void> => {
       if (!req.user) {
-        res.status(401).json({ message: "User not authenticated" });
-        return;
+        return this.sendError(res, "User not authenticated", 401);
       }
       const { id: userId } = req.user;
       const {
@@ -173,18 +178,17 @@ export class TransactionController {
         bankAccountId,
       } = req.body;
 
-      if (
-        !sourceAmount ||
-        !sourceCurrency ||
-        !sourceChain ||
-        !destinationCurrency ||
-        !destinationChain ||
-        !bankAccountId
-      ) {
-        res
-          .status(400)
-          .json({ message: "Missing required fields for crypto-to-fiat" });
-        return;
+      // Validation
+      const validationError = this.validateRequiredFields(req.body, [
+        "sourceAmount",
+        "sourceCurrency",
+        "sourceChain",
+        "destinationCurrency",
+        "destinationChain",
+        "bankAccountId",
+      ]);
+      if (validationError) {
+        return this.sendError(res, validationError);
       }
 
       let bankAccount: any;
@@ -195,8 +199,7 @@ export class TransactionController {
       //   );
 
       if (!bankAccount) {
-        res.status(404).json({ message: "bankAccount not found" });
-        return;
+        return this.sendError(res, "Bank account not found", 404);
       }
 
       // Generate address for receiving crypto
@@ -215,23 +218,20 @@ export class TransactionController {
           break;
 
         default:
-          res.status(400).json({ message: "Unsupported source chain" });
-          return;
+          return this.sendError(res, "Unsupported source chain");
       }
 
       // Validate sourceAmount is a valid number
       let numericSourceAmount: number;
       try {
-        numericSourceAmount =
-          TransactionController.validateAndParseAmount(sourceAmount);
+        numericSourceAmount = this.validateAndParseAmount(sourceAmount);
       } catch (error) {
-        res.status(400).json({
-          message:
-            error instanceof Error
-              ? error.message
-              : "Invalid source amount. Must be a positive number.",
-        });
-        return;
+        return this.sendError(
+          res,
+          error instanceof Error
+            ? error.message
+            : "Invalid source amount. Must be a positive number."
+        );
       }
 
       const { destinationEquivalent, exchangeRate } = await getTokenEquivalent(
@@ -267,22 +267,20 @@ export class TransactionController {
         transactionId
       );
 
-      res.status(201).json({
-        success: true,
-        transaction,
-      });
-    } catch (error) {
-      console.error("Error creating crypto-to-fiat transaction:", error);
-      res.status(500).json({ message: "Internal server error" });
+      return this.sendSuccess(
+        res,
+        { transaction },
+        "Crypto-to-fiat transaction created successfully",
+        201
+      );
     }
-  }
+  );
 
   // Create a crypto-to-crypto transaction
-  static async createCryptoToCryptoTransaction(req: Request, res: Response) {
-    try {
+  createCryptoToCryptoTransaction = this.asyncHandler(
+    async (req: Request, res: Response): Promise<Response | void> => {
       if (!req.user) {
-        res.status(401).json({ message: "User not authenticated" });
-        return;
+        return this.sendError(res, "User not authenticated", 401);
       }
       const { id: userId } = req.user;
       const {
@@ -295,33 +293,30 @@ export class TransactionController {
         tokenMint,
       } = req.body;
 
-      if (
-        !sourceAmount ||
-        !sourceCurrency ||
-        !destinationCurrency ||
-        !destinationAddress ||
-        !sourceChain ||
-        !destinationChain
-      ) {
-        res
-          .status(400)
-          .json({ message: "Missing required fields for crypto-to-crypto" });
-        return;
+      // Validation
+      const validationError = this.validateRequiredFields(req.body, [
+        "sourceAmount",
+        "sourceCurrency",
+        "destinationCurrency",
+        "destinationAddress",
+        "sourceChain",
+        "destinationChain",
+      ]);
+      if (validationError) {
+        return this.sendError(res, validationError);
       }
 
       // Validate sourceAmount is a valid number
       let numericSourceAmount: number;
       try {
-        numericSourceAmount =
-          TransactionController.validateAndParseAmount(sourceAmount);
+        numericSourceAmount = this.validateAndParseAmount(sourceAmount);
       } catch (error) {
-        res.status(400).json({
-          message:
-            error instanceof Error
-              ? error.message
-              : "Invalid source amount. Must be a positive number.",
-        });
-        return;
+        return this.sendError(
+          res,
+          error instanceof Error
+            ? error.message
+            : "Invalid source amount. Must be a positive number."
+        );
       }
 
       let destinationAmount: number;
@@ -339,10 +334,12 @@ export class TransactionController {
         exchangeRate = result.exchangeRate;
       } catch (error) {
         console.error("Error getting token equivalent:", error);
-        return res.status(400).json({
-          error: "Failed to calculate token equivalent",
-          message: error instanceof Error ? error.message : "Unknown error",
-        });
+        return this.sendError(
+          res,
+          error instanceof Error
+            ? error.message
+            : "Failed to calculate token equivalent"
+        );
       }
 
       const feeAmount = new Decimal(destinationAmount).mul(0.015).toNumber();
@@ -355,11 +352,10 @@ export class TransactionController {
       if (sourceChain === "ethereum") {
         sourceAddress = await this.generateEthereumAddressFromMnemonic(userId);
       } else {
-        res.status(400).json({ message: "Unsupported source chain" });
-        return;
+        return this.sendError(res, "Unsupported source chain");
       }
 
-      await this.watchUrl.addAddressToWatcher({
+      await this.watchService.addAddressToWatcher({
         address: sourceAddress,
         tokenMint,
         chain: sourceChain,
@@ -390,26 +386,28 @@ export class TransactionController {
         transactionId
       );
 
-      res.status(201).json({
-        success: true,
-        transaction,
-      });
-    } catch (error) {
-      console.error("Error creating crypto-to-crypto transaction:", error);
-      res.status(500).json({ message: "Internal server error" });
+      return this.sendSuccess(
+        res,
+        { transaction },
+        "Crypto-to-crypto transaction created successfully",
+        201
+      );
     }
-  }
+  );
 
   // Get transaction by ID
-  static async getTransactionById(req: Request, res: Response) {
-    try {
+  getTransactionById = this.asyncHandler(
+    async (req: Request, res: Response): Promise<Response | void> => {
       if (!req.user) {
-        res.status(401).json({ message: "User not authenticated" });
-        return;
+        return this.sendError(res, "User not authenticated", 401);
       }
 
       const { transactionId } = req.params;
       const { id: userId } = req.user;
+
+      if (!transactionId) {
+        return this.sendError(res, "Transaction ID is required");
+      }
 
       const transaction =
         await this.transactionService.getTransactionByTransactionId(
@@ -417,23 +415,18 @@ export class TransactionController {
         );
 
       if (!transaction || transaction.userId !== userId) {
-        res.status(404).json({ message: "Transaction not found" });
-        return;
+        return this.sendError(res, "Transaction not found", 404);
       }
 
-      res.json({ success: true, transaction });
-    } catch (error) {
-      console.error("Error fetching transaction:", error);
-      res.status(500).json({ message: "Internal server error" });
+      return this.sendSuccess(res, { transaction });
     }
-  }
+  );
 
   // Get user transactions
-  static async getUserTransactions(req: Request, res: Response) {
-    try {
+  getUserTransactions = this.asyncHandler(
+    async (req: Request, res: Response): Promise<Response | void> => {
       if (!req.user) {
-        res.status(401).json({ message: "User not authenticated" });
-        return;
+        return this.sendError(res, "User not authenticated", 401);
       }
       const { id: userId } = req.user;
       const { page = 1, limit = 10, status } = req.query;
@@ -456,28 +449,32 @@ export class TransactionController {
         startIndex + Number(limit)
       );
 
-      res.json({
-        success: true,
+      return this.sendSuccess(res, {
         transactions: paginatedTransactions,
         totalPages: Math.ceil(filteredTransactions.length / Number(limit)),
         currentPage: Number(page),
         total: filteredTransactions.length,
       });
-    } catch (error) {
-      console.error("Error fetching user transactions:", error);
-      res.status(500).json({ message: "Internal server error" });
     }
-  }
+  );
 
   // Update crypto status (for internal use)
-  static async updateCryptoStatus(req: Request, res: Response) {
-    try {
+  updateCryptoStatus = this.asyncHandler(
+    async (req: Request, res: Response): Promise<Response | void> => {
       const { id } = req.params;
       const { status, txHash } = req.body;
 
+      if (!id) {
+        return this.sendError(res, "Transaction ID is required");
+      }
+
+      const validationError = this.validateRequiredFields(req.body, ["status"]);
+      if (validationError) {
+        return this.sendError(res, validationError);
+      }
+
       if (!Object.values(TransactionStatus).includes(status)) {
-        res.status(400).json({ message: "Invalid status" });
-        return;
+        return this.sendError(res, "Invalid status");
       }
 
       const success = await this.transactionService.updateCryptoStatus(
@@ -487,14 +484,21 @@ export class TransactionController {
       );
 
       if (!success) {
-        res.status(404).json({ message: "Transaction not found" });
-        return;
+        return this.sendError(res, "Transaction not found", 404);
       }
 
-      res.json({ message: "Crypto status updated successfully" });
-    } catch (error) {
-      console.error("Error updating crypto status:", error);
-      res.status(500).json({ message: "Internal server error" });
+      return this.sendSuccess(res, {}, "Crypto status updated successfully");
     }
-  }
+  );
 }
+
+// Export controller instance methods for backward compatibility
+const transactionController = new TransactionController();
+export const {
+  createFiatToCryptoTransaction,
+  createCryptoToFiatTransaction,
+  createCryptoToCryptoTransaction,
+  getTransactionById,
+  getUserTransactions,
+  updateCryptoStatus,
+} = transactionController;
