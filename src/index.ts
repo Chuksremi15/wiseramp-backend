@@ -10,14 +10,14 @@ import transactionRoute from "./routes/transaction.routes.js";
 import { dbManager, initializeDatabase } from "./db/connection.js";
 
 const app = express();
-const PORT = process.env.PORT || 3300;
+const PORT = process.env.PORT || 3150;
 
 app.use(
   cors({
     origin: (origin, callback) => {
       const allowedOrigins = [
         "*",
-        "http://localhost:7500",
+        "http://localhost:2150",
         "https://wiseramp.vercel.app",
       ];
 
