@@ -15,6 +15,20 @@
       "when": 1760855858861,
       "tag": "0001_typical_lilandra",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1760858956081,
+      "tag": "0002_great_carnage",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1760864753657,
+      "tag": "0003_damp_mother_askani",
+      "breakpoints": true
     }
   ]
 }

@@ -8,6 +8,8 @@ import express, { Request, Response } from "express";
 import authRouter from "./routes/auth.routes.js";
 import transactionRoute from "./routes/transaction.routes.js";
 import { dbManager, initializeDatabase } from "./db/connection.js";
+import bankAccountRoutes from "./routes/bank-account.routes.js";
+import userAddressRoutes from "./routes/user-address.routes.js";
 
 const app = express();
 const PORT = process.env.PORT || 3150;
@@ -67,6 +69,8 @@ app.use((req: Request, res: Response, next) => {
 
 app.use("/auth", authRouter);
 app.use("/transaction", transactionRoute);
+app.use("/api/bank-account", bankAccountRoutes);
+app.use("/api/user-address", userAddressRoutes);
 
 // Basic route
 app.get("/", (req: Request, res: Response) => {

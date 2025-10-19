@@ -12,7 +12,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
-import { TransactionStatus, Chain } from "../shared/types.js";
+import { TransactionStatus, Chain } from "../shared/types";
 
 export const chainEnum = pgEnum(
   "chain",
@@ -201,6 +201,20 @@ export const BankAccount = pgTable("bank_account", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+export const UserAddress = pgTable("user_address", {
+  id: text("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => users.id),
+  chain: text("chain"),
+  addressName: text("address_name"),
+  userAddress: text("user_address"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 
@@ -209,3 +223,6 @@ export type NewTransaction = typeof transactions.$inferInsert;
 
 export type BankAccountType = typeof BankAccount.$inferSelect;
 export type NewBankAccount = typeof BankAccount.$inferInsert;
+
+export type UserAddressType = typeof UserAddress.$inferSelect;
+export type NewUserAddress = typeof UserAddress.$inferInsert;

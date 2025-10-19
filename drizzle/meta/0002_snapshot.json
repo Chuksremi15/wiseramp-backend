@@ -1,0 +1,766 @@
+{
+  "id": "466b5b8a-f150-4e2a-84f7-acb10d6228d7",
+  "prevId": "24d120b7-7249-40a5-ab29-9cb29f277e64",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.bank_account": {
+      "name": "bank_account",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "account_name": {
+          "name": "account_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "bank_name": {
+          "name": "bank_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "account_number": {
+          "name": "account_number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "bank_code": {
+          "name": "bank_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "bank_account_user_id_users_id_fk": {
+          "name": "bank_account_user_id_users_id_fk",
+          "tableFrom": "bank_account",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.transactions": {
+      "name": "transactions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "transaction_id": {
+          "name": "transaction_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "transaction_type": {
+          "name": "transaction_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'deposit'"
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_email": {
+          "name": "user_email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "user_name": {
+          "name": "user_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source_chain": {
+          "name": "source_chain",
+          "type": "chain",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "destination_chain": {
+          "name": "destination_chain",
+          "type": "chain",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source_amount": {
+          "name": "source_amount",
+          "type": "numeric(20, 8)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_currency": {
+          "name": "source_currency",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_address": {
+          "name": "source_address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source_bank_account_number": {
+          "name": "source_bank_account_number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source_bank_name": {
+          "name": "source_bank_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source_bank_code": {
+          "name": "source_bank_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source_bank_account_name": {
+          "name": "source_bank_account_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source_fee": {
+          "name": "source_fee",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source_usd_value": {
+          "name": "source_usd_value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "destination_amount": {
+          "name": "destination_amount",
+          "type": "numeric(20, 8)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "destination_currency": {
+          "name": "destination_currency",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "destination_address": {
+          "name": "destination_address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "destination_bank_account_number": {
+          "name": "destination_bank_account_number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "destination_bank_name": {
+          "name": "destination_bank_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "destination_bank_code": {
+          "name": "destination_bank_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "destination_account_name": {
+          "name": "destination_account_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "destination_fee": {
+          "name": "destination_fee",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "destination_usd_value": {
+          "name": "destination_usd_value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "token_amount": {
+          "name": "token_amount",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "token_address": {
+          "name": "token_address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "exchange_rate": {
+          "name": "exchange_rate",
+          "type": "numeric(20, 8)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'1'"
+        },
+        "fee_amount": {
+          "name": "fee_amount",
+          "type": "numeric(20, 8)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
+        "fee_percentage": {
+          "name": "fee_percentage",
+          "type": "numeric(5, 4)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
+        "net_amount": {
+          "name": "net_amount",
+          "type": "numeric(20, 8)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
+        "status": {
+          "name": "status",
+          "type": "transaction_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "crypto_status": {
+          "name": "crypto_status",
+          "type": "transaction_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fiat_status": {
+          "name": "fiat_status",
+          "type": "transaction_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "internal_transfer_status": {
+          "name": "internal_transfer_status",
+          "type": "transaction_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "crypto_received_at": {
+          "name": "crypto_received_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "crypto_sent_at": {
+          "name": "crypto_sent_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fiat_received_at": {
+          "name": "fiat_received_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fiat_sent_at": {
+          "name": "fiat_sent_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "expired_at": {
+          "name": "expired_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "source_transaction_hash": {
+          "name": "source_transaction_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "destination_transaction_hash": {
+          "name": "destination_transaction_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "notes": {
+          "name": "notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "admin_notes": {
+          "name": "admin_notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sweep_admin_notes": {
+          "name": "sweep_admin_notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "user_notes": {
+          "name": "user_notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "estimated_processing_time": {
+          "name": "estimated_processing_time",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "slippage_tolerance": {
+          "name": "slippage_tolerance",
+          "type": "numeric(5, 4)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "gas_fee": {
+          "name": "gas_fee",
+          "type": "numeric(20, 8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "network_fee": {
+          "name": "network_fee",
+          "type": "numeric(20, 8)",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "transaction_id_idx": {
+          "name": "transaction_id_idx",
+          "columns": [
+            {
+              "expression": "transaction_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "user_id_idx": {
+          "name": "user_id_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "source_chain_status_idx": {
+          "name": "source_chain_status_idx",
+          "columns": [
+            {
+              "expression": "source_chain",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "crypto_status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "source_address",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "expired_status_idx": {
+          "name": "expired_status_idx",
+          "columns": [
+            {
+              "expression": "expired_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "user_created_idx": {
+          "name": "user_created_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "source_address_status_idx": {
+          "name": "source_address_status_idx",
+          "columns": [
+            {
+              "expression": "source_address",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "crypto_status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "status_expired_idx": {
+          "name": "status_expired_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "expired_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "transactions_user_id_users_id_fk": {
+          "name": "transactions_user_id_users_id_fk",
+          "tableFrom": "transactions",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "transactions_transaction_id_unique": {
+          "name": "transactions_transaction_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "transaction_id"
+          ]
+        },
+        "transactions_source_transaction_hash_unique": {
+          "name": "transactions_source_transaction_hash_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "source_transaction_hash"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.users": {
+      "name": "users",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "phone": {
+          "name": "phone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "password": {
+          "name": "password",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "avatar": {
+          "name": "avatar",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reserve_account_ref": {
+          "name": "reserve_account_ref",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reserve_accounts": {
+          "name": "reserve_accounts",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "phone_idx": {
+          "name": "phone_idx",
+          "columns": [
+            {
+              "expression": "phone",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "email_idx": {
+          "name": "email_idx",
+          "columns": [
+            {
+              "expression": "email",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "public.chain": {
+      "name": "chain",
+      "schema": "public",
+      "values": [
+        "ethereum",
+        "bsc",
+        "polygon",
+        "arbitrum",
+        "optimism",
+        "avalanche",
+        "base",
+        "fiat"
+      ]
+    },
+    "public.transaction_status": {
+      "name": "transaction_status",
+      "schema": "public",
+      "values": [
+        "pending",
+        "waiting_for_crypto",
+        "crypto_pending",
+        "crypto_confirmed",
+        "processing",
+        "processing_payout",
+        "waiting_for_fiat",
+        "fiat_pending",
+        "fiat_confirmed",
+        "balance_verification_failed",
+        "token_to_vault_transfer_failed",
+        "token_from_vault_transfer_failed",
+        "token_to_vault_transfer_queued",
+        "internal_supply_failed",
+        "internal_supply_completed",
+        "completed",
+        "cancelled",
+        "failed",
+        "expired"
+      ]
+    }
+  },
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}
