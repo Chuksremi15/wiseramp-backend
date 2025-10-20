@@ -4,7 +4,6 @@ export type SupportedChain = "ethereum" | "polygon" | "bsc" | "solana"; // adjus
 
 export interface AddAddressPayload {
   address: string;
-  tokenMint: string;
   chain: SupportedChain | string; // use SupportedChain if you want strict typing
   timeoutMs: number;
 }

@@ -9,6 +9,7 @@ import { HDNodeWallet, Mnemonic } from "ethers";
 import { normalizeAddress } from "../utils/address.js";
 import { AddressWatcherService } from "../services/address-watcher.service.js";
 import { BaseController } from "./base.controller.js";
+import { BankAccountService } from "../services/bank-account.service.js";
 
 export class TransactionController extends BaseController {
   private transactionService: PostgresTransactionService;
@@ -191,12 +192,10 @@ export class TransactionController extends BaseController {
         return this.sendError(res, validationError);
       }
 
-      let bankAccount: any;
-
-      //   const bankAccount = await BankAccountService.getBankAccountById(
-      //     bankAccountId,
-      //     userId
-      //   );
+      const bankAccount = await BankAccountService.getBankAccountById(
+        bankAccountId,
+        userId
+      );
 
       if (!bankAccount) {
         return this.sendError(res, "Bank account not found", 404);
@@ -244,6 +243,12 @@ export class TransactionController extends BaseController {
         .sub(feeAmount)
         .toNumber();
 
+      await this.watchService.addAddressToWatcher({
+        address: sourceAddress,
+        chain: sourceChain,
+        timeoutMs: 30 * 60 * 1000,
+      });
+
       const transactionId =
         await this.transactionService.createCryptoToFiatTransaction({
           userId: userId,
@@ -290,7 +295,6 @@ export class TransactionController extends BaseController {
         destinationAddress,
         sourceChain,
         destinationChain,
-        tokenMint,
       } = req.body;
 
       // Validation
@@ -357,7 +361,6 @@ export class TransactionController extends BaseController {
 
       await this.watchService.addAddressToWatcher({
         address: sourceAddress,
-        tokenMint,
         chain: sourceChain,
         timeoutMs: 30 * 60 * 1000,
       });
@@ -379,7 +382,6 @@ export class TransactionController extends BaseController {
           exchangeRate: exchangeRate.toString(),
           feeAmount: feeAmount.toString(),
           netAmount: netAmount.toString(),
-          tokenMint: tokenMint,
         });
 
       const transaction = await this.transactionService.getTransactionById(

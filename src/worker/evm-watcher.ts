@@ -4,6 +4,7 @@ import { PostgresTransactionService } from "../services/transaction.service.js";
 import { TransactionStatus } from "../shared/types.js";
 import express, { Request, Response } from "express";
 import axios from "axios";
+import { initializeDatabase } from "../db/connection.js";
 
 import WebSocket, { WebSocketServer } from "ws";
 import http from "http";
@@ -23,12 +24,7 @@ dotenv.config();
 
 app.use(
   cors({
-    origin: [
-      "http://localhost:2000",
-      "http://localhost:2100",
-      "https://coinbox.vercel.app",
-      "https://coinbox-git-main-chuksremi15s-projects.vercel.app",
-    ],
+    origin: ["http://localhost:3150", "https://wiseramp.vercel.app"],
     credentials: true,
   })
 );
@@ -358,7 +354,6 @@ async function loadAddressesFromDB() {
       console.error(`[${chain.name}] Error loading addresses from DB:`, error);
     }
   }
-  console.log("Loaded addresses for all chains.");
 }
 
 // Health check and restart listeners if needed
@@ -853,6 +848,16 @@ async function pendingTxHandler(chain: string, txHash: string) {
 
 async function startWorker() {
   console.log("Starting EVM watcher worker...");
+
+  // Initialize database connection first
+  try {
+    await initializeDatabase();
+    console.log("✅ Database connection initialized for EVM watcher");
+  } catch (error) {
+    console.error("❌ Failed to initialize database connection:", error);
+    process.exit(1);
+  }
+
   await loadAddressesFromDB();
 
   for (const chain of CHAINS_WITH_TOKENS) {

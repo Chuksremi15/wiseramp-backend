@@ -415,7 +415,6 @@ export class PostgresTransactionService {
     netAmount: string;
     userEmail?: string;
     userName?: string;
-    tokenMint?: string;
   }): Promise<string> {
     const transactionData = {
       transactionType: TransactionType.CRYPTO_TO_CRYPTO,
@@ -433,7 +432,6 @@ export class PostgresTransactionService {
       exchangeRate: params.exchangeRate,
       feeAmount: params.feeAmount || "0",
       netAmount: params.netAmount,
-      tokenMint: params.tokenMint,
       cryptoStatus: "waiting_for_crypto" as TransactionStatus,
     };
 
