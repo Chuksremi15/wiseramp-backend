@@ -10,6 +10,7 @@ import transactionRoute from "./routes/transaction.routes.js";
 import { dbManager, initializeDatabase } from "./db/connection.js";
 import bankAccountRoutes from "./routes/bank-account.routes.js";
 import userAddressRoutes from "./routes/user-address.routes.js";
+import transactionExpiryWorker from "./worker/transaction-expiry.js";
 
 const app = express();
 const PORT = process.env.PORT || 3150;
@@ -61,6 +62,9 @@ app.use((req: Request, res: Response, next) => {
     console.log(
       "\x1b[32m✅ Enhanced PostgreSQL connection initialized successfully.\x1b[0m"
     );
+
+    // Start the transaction expiry worker after database connection
+    transactionExpiryWorker.start();
   } catch (error) {
     console.error("❌ Failed to initialize database connections:", error);
     process.exit(1);
