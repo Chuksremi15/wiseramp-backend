@@ -7,28 +7,115 @@ import {
   type NewTransaction,
 } from "../db/schema.js";
 import { TransactionType, TransactionStatus } from "../shared/types.js";
+import { hypersyncWorker } from "../worker/hypersync-worker.js";
 
 export class PostgresTransactionService {
   // Create a new transaction
+  // async createTransaction(
+  //   transactionData: Partial<
+  //     Omit<NewTransaction, "id" | "createdAt" | "updatedAt" | "transactionId">
+  //   >
+  // ): Promise<string> {
+  //   // Fail fast if we can't monitor
+  //   if (!hypersyncWorker.getStatus().isRunning) {
+  //     throw new Error(
+  //       "Payment monitoring unavailable. Please try again later."
+  //     );
+  //   }
+
+  //   // Start monitoring BEFORE creating transaction
+  //   const monitoringStarted = this.startHypersyncMonitoring(transactionData);
+  //   if (!monitoringStarted) {
+  //     throw new Error("Failed to start payment monitoring");
+  //   }
+
+  //   // Set defaults for null/undefined fields
+  //   const defaultedData = this.setTransactionDefaults(transactionData);
+
+  //   const db = getDatabase();
+  //   const [result] = await db
+  //     .insert(transactions)
+  //     .values({
+  //       ...defaultedData,
+  //       transactionId: this.generateTransactionId(),
+  //       expiredAt: new Date(Date.now() + 20 * 60 * 1000), // 20 minutes
+  //     })
+  //     .returning({ id: transactions.id });
+
+  //   return result.id;
+  // }
+
   async createTransaction(
     transactionData: Partial<
       Omit<NewTransaction, "id" | "createdAt" | "updatedAt" | "transactionId">
     >
   ): Promise<string> {
-    // Set defaults for null/undefined fields
-    const defaultedData = this.setTransactionDefaults(transactionData);
+    // 1. Comprehensive health check
+    if (!transactionData.sourceChain) {
+      throw new Error("Source chain is required for payment monitoring");
+    }
 
-    const db = getDatabase();
-    const [result] = await db
-      .insert(transactions)
-      .values({
-        ...defaultedData,
-        transactionId: this.generateTransactionId(),
-        expiredAt: new Date(Date.now() + 20 * 60 * 1000), // 20 minutes
-      })
-      .returning({ id: transactions.id });
+    // 2. Start monitoring BEFORE creating transaction
+    const monitoringStarted = await this.startHypersyncMonitoring(
+      transactionData
+    );
+    if (!monitoringStarted) {
+      throw new Error("Failed to start payment monitoring");
+    }
 
-    return result.id;
+    try {
+      // 3. Create transaction (monitoring already active)
+      const defaultedData = this.setTransactionDefaults(transactionData);
+      const db = getDatabase();
+
+      const [result] = await db
+        .insert(transactions)
+        .values({
+          ...defaultedData,
+          transactionId: this.generateTransactionId(),
+          expiredAt: new Date(Date.now() + 20 * 60 * 1000),
+        })
+        .returning({ id: transactions.id });
+
+      console.log(`✅ Transaction ${result.id} created with monitoring active`);
+      return result.id;
+    } catch (error) {
+      // 4. Cleanup monitoring if transaction creation fails
+      if (transactionData.sourceAddress && transactionData.sourceChain) {
+        hypersyncWorker.removeAddress(
+          transactionData.sourceAddress,
+          transactionData.sourceChain
+        );
+        console.log(
+          `🧹 Cleaned up monitoring for ${transactionData.sourceAddress}`
+        );
+      }
+      throw error;
+    }
+  }
+
+  async startHypersyncMonitoring(transaction: any) {
+    if (!transaction?.sourceAddress || !transaction?.sourceChain) {
+      console.warn("Invalid transaction: missing address or chain");
+      return false;
+    }
+
+    const { sourceAddress, sourceChain, sourceCurrency } = transaction;
+
+    try {
+      if (sourceCurrency && sourceCurrency !== "ETH") {
+        return await hypersyncWorker.addAddressForToken(
+          sourceAddress,
+          sourceChain,
+          sourceCurrency
+        );
+      } else {
+        return await hypersyncWorker.addAddress(sourceAddress, sourceChain);
+      }
+    } catch (error) {
+      console.error("Failed to start hypersync monitoring:", error);
+      return false;
+    }
   }
 
   // Validate required fields
@@ -357,10 +444,15 @@ export class PostgresTransactionService {
   }
 
   // Expire old transactions
-  async expireOldTransactions(): Promise<number> {
+  async expireOldTransactions(): Promise<{
+    count: number;
+    expiredAddresses: Array<{ address: string; chain: string }>;
+  }> {
     const expiredTransactions = await this.findExpiredTransactions();
 
-    if (expiredTransactions.length === 0) return 0;
+    if (expiredTransactions.length === 0) {
+      return { count: 0, expiredAddresses: [] };
+    }
 
     const expiredIds = expiredTransactions.map((tx) => tx.id);
 
@@ -377,7 +469,26 @@ export class PostgresTransactionService {
       })
       .where(inArray(transactions.id, expiredIds));
 
-    return expiredTransactions.length;
+    // Extract unique addresses that were being monitored
+    const expiredAddresses = expiredTransactions
+      .filter((tx) => tx.sourceAddress && tx.sourceChain)
+      .map((tx) => ({
+        address: tx.sourceAddress!,
+        chain: tx.sourceChain!,
+      }))
+      // Remove duplicates
+      .filter(
+        (addr, index, self) =>
+          index ===
+          self.findIndex(
+            (a) => a.address === addr.address && a.chain === addr.chain
+          )
+      );
+
+    return {
+      count: expiredTransactions.length,
+      expiredAddresses,
+    };
   }
 
   // Update transaction status

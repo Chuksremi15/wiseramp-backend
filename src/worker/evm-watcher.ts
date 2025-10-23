@@ -6,6 +6,14 @@ import express, { Request, Response } from "express";
 import axios from "axios";
 import { initializeDatabase } from "../db/connection.js";
 
+import {
+  HypersyncClient,
+  Decoder,
+  BlockField,
+  LogField,
+  TransactionField,
+} from "@envio-dev/hypersync-client";
+
 import WebSocket, { WebSocketServer } from "ws";
 import http from "http";
 import cors from "cors";
@@ -91,10 +99,11 @@ const CHAINS_WITH_TOKENS = [
     name: "ethereum",
     wsRpcUrl: process.env.ETH_WEBSOCKET_RPC_URL!,
     httpRpcUrl: process.env.ETH_HTTP_RPC_URL!,
+    hyperSyncUrl: "https://sepolia.hypersync.xyz",
     chainId: 11155111,
     supportedTokens: {
       USDT: "0xdAC17F958D2ee523a2206206994597C13D831ec7",
-      USDC: "0xA0b86a33E6441b8C4505B8C4505B8C4505B8C4505", // Example
+      USDC: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", // Example
     },
   },
   // {
@@ -116,6 +125,8 @@ const erc20Watchers: Record<string, ERC20Watcher> = {};
 
 const watcherActive: Record<string, boolean> = {};
 
+const hypersyncClient: Record<string, HypersyncClient> = {};
+
 // PostgreSQL transaction service
 const transactionService = new PostgresTransactionService();
 
@@ -131,6 +142,10 @@ for (const chain of CHAINS_WITH_TOKENS) {
 
   wsProviders[chain.name] = new ethers.WebSocketProvider(chain.wsRpcUrl);
   httpProviders[chain.name] = new ethers.JsonRpcProvider(chain.httpRpcUrl);
+
+  hypersyncClient[chain.name] = HypersyncClient.new({
+    url: chain.hyperSyncUrl,
+  });
 
   erc20Watchers[chain.name] = new ERC20Watcher(
     chain.wsRpcUrl,

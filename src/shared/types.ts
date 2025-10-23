@@ -53,5 +53,6 @@ export enum Chain {
   AVALANCHE = "avalanche",
   BASE = "base",
   FIAT = "fiat",
+  SEPOLIA = "sepolia",
   // Add more chains as needed
 }

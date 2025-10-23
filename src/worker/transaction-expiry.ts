@@ -1,5 +1,6 @@
 import { PostgresTransactionService } from "../services/transaction.service.js";
 import { TransactionStatus } from "../shared/types.js";
+import { hypersyncWorker } from "./hypersync-worker.js";
 
 class TransactionExpiryWorker {
   private static transactionService = new PostgresTransactionService();
@@ -73,14 +74,46 @@ class TransactionExpiryWorker {
       );
 
       const startTime = Date.now();
-      const expiredCount =
+      const result =
         await TransactionExpiryWorker.transactionService.expireOldTransactions();
       const duration = Date.now() - startTime;
 
-      if (expiredCount > 0) {
+      if (result.count > 0) {
         console.log(
-          `[${new Date().toISOString()}] Expired ${expiredCount} transactions in ${duration}ms`
+          `[${new Date().toISOString()}] Expired ${
+            result.count
+          } transactions in ${duration}ms`
         );
+
+        // Remove expired addresses from hypersync monitoring (only if no other active transactions)
+        if (result.expiredAddresses.length > 0) {
+          console.log(
+            `[${new Date().toISOString()}] Cleaning up ${
+              result.expiredAddresses.length
+            } addresses from hypersync monitoring...`
+          );
+
+          let removedCount = 0;
+          for (const { address, chain } of result.expiredAddresses) {
+            const removed =
+              await hypersyncWorker.removeAddressIfNoActiveTransactions(
+                address,
+                chain
+              );
+            if (removed) {
+              removedCount++;
+              console.log(
+                `[${new Date().toISOString()}] Removed ${address} from ${chain} monitoring`
+              );
+            }
+          }
+
+          console.log(
+            `[${new Date().toISOString()}] Successfully removed ${removedCount}/${
+              result.expiredAddresses.length
+            } addresses from hypersync monitoring`
+          );
+        }
       } else {
         console.log(
           `[${new Date().toISOString()}] No transactions to expire (checked in ${duration}ms)`
@@ -125,6 +158,21 @@ class TransactionExpiryWorker {
 
       if (success) {
         console.log(`Manually expired transaction ${transactionId}`);
+
+        // Clean up hypersync monitoring if this was the last active transaction for this address
+        if (transaction.sourceAddress && transaction.sourceChain) {
+          const removed =
+            await hypersyncWorker.removeAddressIfNoActiveTransactions(
+              transaction.sourceAddress,
+              transaction.sourceChain
+            );
+          if (removed) {
+            console.log(
+              `Removed ${transaction.sourceAddress} from ${transaction.sourceChain} monitoring (no more active transactions)`
+            );
+          }
+        }
+
         return true;
       } else {
         console.error(`Failed to expire transaction ${transactionId}`);
@@ -165,13 +213,73 @@ class TransactionExpiryWorker {
       console.log(
         `[${new Date().toISOString()}] Force running transaction expiry check...`
       );
-      return await TransactionExpiryWorker.transactionService.expireOldTransactions();
+
+      const result =
+        await TransactionExpiryWorker.transactionService.expireOldTransactions();
+
+      // Clean up hypersync monitoring for expired addresses (only if no other active transactions)
+      if (result.expiredAddresses.length > 0) {
+        console.log(
+          `[${new Date().toISOString()}] Cleaning up ${
+            result.expiredAddresses.length
+          } addresses from hypersync monitoring...`
+        );
+
+        let removedCount = 0;
+        for (const { address, chain } of result.expiredAddresses) {
+          const removed =
+            await hypersyncWorker.removeAddressIfNoActiveTransactions(
+              address,
+              chain
+            );
+          if (removed) {
+            removedCount++;
+          }
+        }
+
+        console.log(
+          `[${new Date().toISOString()}] Removed ${removedCount}/${
+            result.expiredAddresses.length
+          } addresses from hypersync monitoring`
+        );
+      }
+
+      return result.count;
     } catch (error) {
       console.error(
         `[${new Date().toISOString()}] Error in force expiry:`,
         error
       );
       return 0;
+    }
+  }
+
+  /**
+   * Get monitoring statistics
+   */
+  public async getMonitoringStats(): Promise<{
+    hypersyncStatus: any;
+    expiredTransactionsCount: number;
+    pendingTransactionsCount: number;
+  }> {
+    try {
+      const [expiredTransactions, pendingTransactions] = await Promise.all([
+        TransactionExpiryWorker.transactionService.findExpiredTransactions(),
+        TransactionExpiryWorker.transactionService.getPendingCryptoTransactions(),
+      ]);
+
+      return {
+        hypersyncStatus: hypersyncWorker.getStatus(),
+        expiredTransactionsCount: expiredTransactions.length,
+        pendingTransactionsCount: pendingTransactions.length,
+      };
+    } catch (error) {
+      console.error("Error getting monitoring stats:", error);
+      return {
+        hypersyncStatus: { error: "Failed to get hypersync status" },
+        expiredTransactionsCount: 0,
+        pendingTransactionsCount: 0,
+      };
     }
   }
 

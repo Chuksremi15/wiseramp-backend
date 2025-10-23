@@ -10,7 +10,9 @@ import transactionRoute from "./routes/transaction.routes.js";
 import { dbManager, initializeDatabase } from "./db/connection.js";
 import bankAccountRoutes from "./routes/bank-account.routes.js";
 import userAddressRoutes from "./routes/user-address.routes.js";
+import tokenRoutes from "./routes/token.routes.js";
 import transactionExpiryWorker from "./worker/transaction-expiry.js";
+import { hypersyncWorker } from "./worker/hypersync-worker.js";
 
 const app = express();
 const PORT = process.env.PORT || 3150;
@@ -63,6 +65,9 @@ app.use((req: Request, res: Response, next) => {
       "\x1b[32m✅ Enhanced PostgreSQL connection initialized successfully.\x1b[0m"
     );
 
+    // Load active transactions into hypersync worker after database is ready
+    await hypersyncWorker.loadActiveTransactions();
+
     // Start the transaction expiry worker after database connection
     transactionExpiryWorker.start();
   } catch (error) {
@@ -75,6 +80,7 @@ app.use("/auth", authRouter);
 app.use("/transaction", transactionRoute);
 app.use("/api/bank-account", bankAccountRoutes);
 app.use("/api/user-address", userAddressRoutes);
+app.use("/api/tokens", tokenRoutes);
 
 // Basic route
 app.get("/", (req: Request, res: Response) => {

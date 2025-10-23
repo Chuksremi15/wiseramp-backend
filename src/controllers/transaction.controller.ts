@@ -211,6 +211,7 @@ export class TransactionController extends BaseController {
         case "optimism":
         case "avalanche":
         case "base":
+        case "sepolia":
           sourceAddress = await this.generateEthereumAddressFromMnemonic(
             userId
           );
@@ -242,12 +243,6 @@ export class TransactionController extends BaseController {
       const netAmount = new Decimal(numericSourceAmount)
         .sub(feeAmount)
         .toNumber();
-
-      await this.watchService.addAddressToWatcher({
-        address: sourceAddress,
-        chain: sourceChain,
-        timeoutMs: 30 * 60 * 1000,
-      });
 
       const transactionId =
         await this.transactionService.createCryptoToFiatTransaction({

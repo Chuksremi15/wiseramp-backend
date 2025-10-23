@@ -1,0 +1,1 @@
+ALTER TYPE "public"."chain" ADD VALUE 'sepolia';
