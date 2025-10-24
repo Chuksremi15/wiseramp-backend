@@ -14,9 +14,8 @@ export class AuthController extends BaseController {
 
   registerUser = this.asyncHandler(
     async (req: Request, res: Response): Promise<Response | void> => {
-      const { name, phone, email, password } = req.body as {
+      const { name, email, password } = req.body as {
         name: string;
-        phone: string;
         email: string;
         password: string;
       };
@@ -24,7 +23,6 @@ export class AuthController extends BaseController {
       // Basic validation
       const validationError = this.validateRequiredFields(req.body, [
         "name",
-        "phone",
         "email",
         "password",
       ]);
@@ -33,10 +31,7 @@ export class AuthController extends BaseController {
       }
 
       // Check if user already exists by email or phone
-      const existingUser = await this.authService.findByEmailOrPhone(
-        email,
-        phone
-      );
+      const existingUser = await this.authService.findByEmailNormalized(email);
       if (existingUser) {
         return this.sendError(
           res,
@@ -48,7 +43,6 @@ export class AuthController extends BaseController {
       // Create new user
       const newUser = await this.authService.createUser({
         name,
-        phone,
         email,
         password,
       });
