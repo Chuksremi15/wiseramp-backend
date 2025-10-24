@@ -1,25 +1,21 @@
 import { BaseController } from "./base.controller.js";
 import { Request, Response } from "express";
 import { PostgresUserService } from "../services/user.service.js";
-import { generateMonifyReference } from "../utils/reference-generator.js";
+import { MonifyService } from "../services/monify-service.js";
 import monifyAxios from "../services/monify-axios.service.js";
 import crypto from "crypto";
 import { PostgresTransactionService } from "../services/transaction.service.js";
-import { Chain, TransactionStatus } from "../shared/types.js";
-import { WalletTransferService } from "../services/wallet-transfer.service.js";
-import { type Transaction } from "../db/schema.js";
-
-const CONTRACT_CODE = "6525620582";
-const MONIFY_VAULT_ACCOUNT = "5782214614";
 
 export class MonifyController extends BaseController {
   private userService: PostgresUserService;
   private transactionService: PostgresTransactionService;
+  private monifyService: MonifyService;
 
   constructor() {
     super();
     this.userService = new PostgresUserService();
     this.transactionService = new PostgresTransactionService();
+    this.monifyService = new MonifyService();
   }
 
   createReserveAccount = this.asyncHandler(
@@ -33,59 +29,34 @@ export class MonifyController extends BaseController {
             .json({ message: "Missing required fields: email" });
         }
 
-        const user = await this.userService.findByEmail(email);
+        const result = await this.monifyService.createReserveAccount({ email });
 
-        if (!user) {
-          return res.status(404).json({ message: "User not found" });
-        }
-
-        const accountRequestData = {
-          accountReference: generateMonifyReference(),
-          accountName: `Coinbox/${user.name}`,
-          currencyCode: "NGN",
-          contractCode: CONTRACT_CODE,
-          customerEmail: user.email,
-          customerName: user.name,
-          bvn: "21212121212",
-          getAllAvailableBanks: true,
-          preferredBanks: ["50515"],
-          // incomeSplitConfig: [
-          //   {
-          //     subAccountCode: "MFY_SUB_322165393053",
-          //     feePercentage: 10.5,
-          //     splitAmount: 20,
-          //     feeBearer: true,
-          //   },
-          // ],
-          // metaData: {
-          //   ipAddress: "127.0.0.1",
-          //   deviceType: "mobile",
-          // },
-        };
-
-        const response = await monifyAxios.post(
-          "/api/v2/bank-transfer/reserved-accounts",
-          accountRequestData
-        );
-
-        if (response.data.requestSuccessful) {
-          const { accountReference, accounts } = response.data.responseBody;
-
-          await this.userService.update(user.id, {
-            reserveAccountRef: accountReference,
-            reserveAccounts: accounts,
-          });
-          return res.status(200).json({
-            success: true,
-            data: response.data,
-          });
-        }
+        return res.status(200).json({
+          success: true,
+          data: result,
+        });
       } catch (error: any) {
         console.error("Create reserve account error:", error);
+
+        // Handle specific error cases
+        if (error.message === "User not found") {
+          return res.status(404).json({
+            success: false,
+            message: error.message,
+          });
+        }
+
+        if (error.message === "Missing required field: email") {
+          return res.status(400).json({
+            success: false,
+            message: error.message,
+          });
+        }
+
         return res.status(500).json({
           success: false,
           message: "Failed to create reserve account",
-          error: error.response?.data || error.message,
+          error: error.message,
         });
       }
     }
@@ -102,171 +73,43 @@ export class MonifyController extends BaseController {
             .json({ message: "Missing required fields: email" });
         }
 
-        const user = await this.userService.findByEmail(email);
-
-        if (!user) {
-          return res.status(404).json({ message: "User not found" });
-        }
-
-        const response = await monifyAxios.get(
-          `/api/v2/bank-transfer/reserved-accounts/${user.reserveAccountRef}`
-        );
+        const result = await this.monifyService.getReserveAccount({ email });
 
         return res.status(200).json({
           success: true,
-          data: response.data,
+          data: result,
         });
       } catch (error: any) {
-        console.error("Create reserve account error:", error);
-        return res.status(500).json({
-          success: false,
-          message: "Failed to create reserve account",
-          error: error.response?.data || error.message,
-        });
-      }
-    }
-  );
+        console.error("Get reserve account error:", error);
 
-  // Reusable method for transferring from Monify vault to any account
-  async executeVaultTransfer(params: {
-    amount: number;
-    accountNumber: string;
-    bankCode: string;
-    narration?: string;
-    customReference?: string;
-  }): Promise<{
-    success: boolean;
-    data?: any;
-    txHash?: string;
-    error?: string;
-  }> {
-    try {
-      const { amount: rawAmount, accountNumber, bankCode, narration } = params;
-      const amount = parseFloat(rawAmount.toFixed(2));
-
-      let customReference = generateMonifyReference();
-
-      // Prepare the transfer data
-      const transferData = {
-        amount,
-        reference: customReference,
-        narration: narration || "911 Transaction",
-        destinationBankCode: bankCode,
-        destinationAccountNumber: accountNumber,
-        currency: "NGN",
-        sourceAccountNumber: MONIFY_VAULT_ACCOUNT,
-      };
-
-      try {
-        // Make POST request to the transfer API
-        const response = await monifyAxios.post(
-          "/api/v2/disbursements/single",
-          transferData
-        );
-
-        const { responseBody } = response.data;
-
-        if (!responseBody) {
-          return {
+        // Handle specific error cases
+        if (error.message === "User not found") {
+          return res.status(404).json({
             success: false,
-            error: "Invalid response format from Monify API",
-          };
+            message: error.message,
+          });
         }
 
-        if (responseBody.status === "SUCCESS") {
-          return {
-            success: true,
-            data: responseBody,
-            txHash: responseBody.reference,
-          };
-        } else {
-          return {
+        if (error.message === "Missing required field: email") {
+          return res.status(400).json({
             success: false,
-            error: "Transfer not successful",
-          };
+            message: error.message,
+          });
         }
-      } catch (error: any) {
-        console.error("Monify API Error:", {
-          message: error.message,
-          status: error.response?.status,
-          statusText: error.response?.statusText,
-          data: error.response?.data,
-          config: {
-            url: error.config?.url,
-            method: error.config?.method,
-            headers: error.config?.headers,
-          },
-        });
-        return {
-          success: false,
-          error:
-            error.response?.data?.responseMessage ||
-            error.message ||
-            "API request failed",
-        };
-      }
-    } catch (error: any) {
-      console.error("Vault transfer error:", error);
-      return {
-        success: false,
-        error: error.response?.data || error.message,
-      };
-    }
-  }
 
-  transferFromMonifyVaultToAccount = this.asyncHandler(
-    async (req: Request, res: Response): Promise<Response | void> => {
-      try {
-        const {
-          amount,
-          accountNumber,
-          bankCode,
-          narration,
-          transactionReference,
-        } = req.body;
-
-        // Validate required fields
         if (
-          !amount ||
-          !accountNumber ||
-          !bankCode ||
-          !narration ||
-          !transactionReference
+          error.message === "User does not have a reserve account reference"
         ) {
           return res.status(400).json({
             success: false,
-            message:
-              "Missing required fields: amount, accountNumber, bankCode, narration, transactionReference",
+            message: error.message,
           });
         }
 
-        // Use the reusable method
-        const result = await this.executeVaultTransfer({
-          amount,
-          accountNumber,
-          bankCode,
-          narration,
-          customReference: transactionReference,
-        });
-
-        if (result.success) {
-          return res.status(200).json({
-            success: true,
-            data: result.data,
-          });
-        } else {
-          return res.status(500).json({
-            success: false,
-            message: "Failed to transfer to reserve account",
-            error: result.error,
-          });
-        }
-      } catch (error: any) {
-        console.error("Transfer to reserve account error:", error);
         return res.status(500).json({
           success: false,
-          message: "Failed to transfer to reserve account",
-          error: error.response?.data || error.message,
+          message: "Failed to get reserve account",
+          error: error.message,
         });
       }
     }

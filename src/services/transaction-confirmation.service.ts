@@ -4,12 +4,16 @@ import { WalletTransferService } from "./wallet-transfer.service.js";
 import { Transaction } from "../db/schema.js";
 import { TokenConfigUtils } from "../utils/token-config.js";
 import { SweeperQueueService } from "./sweeper-queue.service.js";
+import { MonifyService } from "./monify-service.js";
+import { generateMonifyReference } from "../utils/reference-generator.js";
 
 export class TransactionConfirmationService {
   private transactionService: PostgresTransactionService;
+  private monifyService: MonifyService;
 
   constructor() {
     this.transactionService = new PostgresTransactionService();
+    this.monifyService = new MonifyService();
   }
 
   /**
@@ -188,28 +192,28 @@ export class TransactionConfirmationService {
       };
 
       switch (transaction.destinationChain) {
-        // case Chain.FIAT: {
-        //   if (
-        //     !transaction.destinationBankAccountNumber ||
-        //     !transaction.destinationBankCode
-        //   ) {
-        //     destinationTransfer = {
-        //       success: false,
-        //       error:
-        //         "Destination account name or bank code is missing for fiat transfer",
-        //     };
-        //     break;
-        //   }
+        case Chain.FIAT: {
+          if (
+            !transaction.destinationBankAccountNumber ||
+            !transaction.destinationBankCode
+          ) {
+            destinationTransfer = {
+              success: false,
+              error:
+                "Destination account name or bank code is missing for fiat transfer",
+            };
+            break;
+          }
 
-        //   destinationTransfer = await monifyController.executeVaultTransfer({
-        //     amount: parseFloat(transaction.destinationAmount),
-        //     accountNumber: transaction.destinationBankAccountNumber,
-        //     bankCode: transaction.destinationBankCode,
-        //     narration: "Custom transfer description",
-        //     customReference: generateMonifyReference(),
-        //   });
-        //   break;
-        // }
+          destinationTransfer = await this.monifyService.executeVaultTransfer({
+            amount: parseFloat(transaction.destinationAmount),
+            accountNumber: transaction.destinationBankAccountNumber,
+            bankCode: transaction.destinationBankCode,
+            narration: "Custom transfer description",
+            customReference: generateMonifyReference(),
+          });
+          break;
+        }
 
         default: {
           destinationTransfer = {

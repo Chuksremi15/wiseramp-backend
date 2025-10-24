@@ -13,6 +13,7 @@ import userAddressRoutes from "./routes/user-address.routes.js";
 import tokenRoutes from "./routes/token.routes.js";
 import transactionExpiryWorker from "./worker/transaction-expiry.js";
 import { hypersyncWorker } from "./worker/hypersync-worker.js";
+import monifyRoutes from "./routes/monify.routes.js";
 
 const app = express();
 const PORT = process.env.PORT || 3150;
@@ -81,6 +82,7 @@ app.use("/transaction", transactionRoute);
 app.use("/api/bank-account", bankAccountRoutes);
 app.use("/api/user-address", userAddressRoutes);
 app.use("/api/tokens", tokenRoutes);
+app.use("/api/monify", monifyRoutes);
 
 // Basic route
 app.get("/", (req: Request, res: Response) => {
