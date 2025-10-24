@@ -1,3 +1,5 @@
+import { TransactionStatus, Chain } from "../shared/types.js";
+
 import {
   pgTable,
   text,
@@ -9,10 +11,9 @@ import {
   uniqueIndex,
   serial,
   jsonb,
+  boolean,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-
-import { TransactionStatus, Chain } from "../shared/types.js";
 
 export const chainEnum = pgEnum(
   "chain",
@@ -51,6 +52,8 @@ export const users = pgTable(
     email: text("email").notNull(),
     password: text("password"),
     avatar: text("avatar"),
+
+    isDeployedWallet: boolean("is_deployed_wallet").notNull().default(false),
 
     reserveAccountRef: text("reserve_account_ref"),
     //Reserve Account - array of bank accounts

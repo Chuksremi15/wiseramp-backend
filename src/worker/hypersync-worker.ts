@@ -595,90 +595,90 @@ export class HypersyncWorker {
   }
 
   private async processTokenTransfer(log: any, chainName: string) {
-    // Decode and process token transfer
-    // Similar to your existing logic
+    try {
+      // Decode and process token transfer
+      const decoder = Decoder.fromSignatures([
+        "Transfer(address indexed from, address indexed to, uint amount)",
+      ]);
 
-    const decoder = Decoder.fromSignatures([
-      "Transfer(address indexed from, address indexed to, uint amount)",
-    ]);
+      const decoded = await decoder.decodeLogs([log]);
 
-    const decoded = await decoder.decodeLogs([log]);
+      const event = decoded[0];
+      if (!event) return;
 
-    const event = decoded[0];
-    if (!event) return;
+      const tokenAddress = log.address.toLowerCase();
+      const from = event.indexed[0].val as string;
+      const to = event.indexed[1].val as string;
+      const amountReceive = event.body[0].val as bigint;
 
-    const logd = {
-      transactionHash:
-        "0xaf7de587f54f4533a481d75ab452290ca483fc40b6ba74b839f99c9033452ecb",
-      blockNumber: 9472216,
-      address: "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
-      data: "0x00000000000000000000000000000000000000000000000000000000001e8480",
-      topics: [
-        "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
-        "0x000000000000000000000000daadf6f9b33a1e01be2a48765d77b116a2d5df77",
-        "0x000000000000000000000000775b1b8a06eba4633c979a4042a9192fffefd1c3",
-        null,
-      ],
-    };
+      console.log("tokenAddress", tokenAddress);
+      console.log("[To: ]", to);
+      console.log("[Amount:]", amountReceive);
 
-    const tokenAddress = log.address.toLowerCase();
-    const from = event.indexed[0].val as string;
-    const to = event.indexed[1].val as string;
-    const amountReceive = event.body[0].val as bigint;
-
-    console.log("tokenAddress", tokenAddress);
-    console.log("[To: ]", to);
-    console.log("[Amount:]", amountReceive);
-
-    const pendingTransactions =
-      await this.getTransactionService().getPendingTransactionsByChainAndAddress(
-        chainName,
-        to
-      );
-
-    if (pendingTransactions.length === 0) {
-      console.log(
-        `[${chainName}] No pending transactions found for address ${to}.`
-      );
-      return;
-    }
-
-    let matchedTransaction = null;
-
-    for (const transaction of pendingTransactions) {
-      // Convert source amount to wei for precise comparison
-      const sourceAmountInWei = ethers.parseEther(transaction.sourceAmount);
-
-      if (amountReceive >= sourceAmountInWei) {
-        matchedTransaction = transaction;
-        console.log(
-          `[${chainName}] Matched transaction ${transaction.transactionId} with amount ${transaction.sourceAmount} ETH`
+      const pendingTransactions =
+        await this.getTransactionService().getPendingTransactionsByChainAndAddress(
+          chainName,
+          to.toLowerCase()
         );
-        break;
+
+      if (pendingTransactions.length === 0) {
+        console.log(
+          `[${chainName}] No pending transactions found for address ${to}.`
+        );
+        return;
       }
-    }
 
-    // If no exact match, use the oldest transaction (FIFO)
-    if (!matchedTransaction) {
-      matchedTransaction = pendingTransactions[0];
-      console.log(
-        `[${chainName}] No exact amount match, using oldest transaction ${matchedTransaction.transactionId}`
+      let matchedTransaction = null;
+
+      for (const transaction of pendingTransactions) {
+        // Convert source amount to wei for precise comparison
+        const sourceAmountInWei = ethers.parseEther(transaction.sourceAmount);
+
+        if (amountReceive >= sourceAmountInWei) {
+          matchedTransaction = transaction;
+          console.log(
+            `[${chainName}] Matched transaction ${transaction.transactionId} with amount ${transaction.sourceAmount} ETH`
+          );
+          break;
+        }
+      }
+
+      // If no exact match, use the oldest transaction (FIFO)
+      if (!matchedTransaction) {
+        matchedTransaction = pendingTransactions[0];
+        console.log(
+          `[${chainName}] No exact amount match, using oldest transaction ${matchedTransaction.transactionId}`
+        );
+      }
+
+      await this.getTransactionService().updateCryptoStatus(
+        matchedTransaction.id,
+        TransactionStatus.CRYPTO_CONFIRMED,
+        log.hash
       );
+
+      const confirmationResult =
+        await this.getTransactionConfirmationService().processConfirmedEvmTransaction(
+          matchedTransaction.transactionId
+        );
+
+      if (!confirmationResult.success) {
+        console.error(
+          `[${chainName}] Transaction confirmation failed:`,
+          confirmationResult.error
+        );
+        // Transaction status will be updated by the confirmation service
+      }
+
+      await this.removeAddressIfNoActiveTransactions(to, chainName);
+
+      console.log(
+        `[${chainName}] Token transfer detected: ${log.transactionHash}`
+      );
+    } catch (error) {
+      console.error(`[${chainName}] Error processing token transfer:`, error);
+      // Don't re-throw to prevent worker from crashing
     }
-
-    await this.getTransactionService().updateCryptoStatus(
-      matchedTransaction.id,
-      TransactionStatus.CRYPTO_CONFIRMED,
-      log.hash
-    );
-
-    this.getTransactionConfirmationService().processConfirmedEvmTransaction(
-      matchedTransaction.transactionId
-    );
-
-    console.log(
-      `[${chainName}] Token transfer detected: ${log.transactionHash}`
-    );
   }
 
   private async processEthTransaction(tx: any, chainName: string) {

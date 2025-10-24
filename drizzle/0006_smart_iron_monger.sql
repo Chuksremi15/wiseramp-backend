@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "is_deployed_wallet" boolean DEFAULT false NOT NULL;

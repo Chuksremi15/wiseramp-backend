@@ -1,6 +1,7 @@
 import { ethers } from "ethers";
 import { TokenConfigUtils } from "../utils/token-config";
 import { deployedContracts } from "../abis/wallet-factory";
+import { PostgresUserService } from "./user.service";
 
 export class WalletTransferService {
   // Cache for contract instances to avoid recreating them
@@ -222,9 +223,13 @@ export class WalletTransferService {
 
       const code = await provider.getCode(predictedAddress);
 
+      const userService = new PostgresUserService();
+      const user = await userService.findByUserId(parseInt(userId));
+
       let tx;
 
-      if (code === "0x") {
+      // if (code === "0x")
+      if (!user?.isDeployedWallet) {
         // Wallet doesn't exist yet - deploy and sweep in one transaction
         console.log(
           `[Sweeper] Deploying and sweeping wallet for user ${userId}, token: ${tokenSymbol}`
@@ -246,6 +251,8 @@ export class WalletTransferService {
             gasLimit: gasLimit + BigInt(20000), // Add a 20k buffer
           }
         );
+
+        await userService.update(parseInt(userId), { isDeployedWallet: true });
 
         console.log(`[Sweeper] Deploy and sweep transaction sent: ${tx.hash}`);
         console.log(
