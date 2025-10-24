@@ -10,6 +10,7 @@ import { PostgresTransactionService } from "../services/transaction.service.js";
 import { TransactionStatus } from "../shared/types.js";
 import { TokenConfigUtils } from "../utils/token-config.js";
 import { ethers } from "ethers";
+import { TransactionConfirmationService } from "../services/transaction-confirmation.service.js";
 
 interface ChainConfig {
   name: string;
@@ -28,6 +29,8 @@ export class HypersyncWorker {
   private isRunning = false;
   private scanInterval: NodeJS.Timeout | null = null;
   private transactionService: PostgresTransactionService | null = null;
+  private transactionConfirmationService: TransactionConfirmationService | null =
+    null;
 
   // In-memory state: chain -> addresses
   private watchedAddresses: Map<string, Map<string, WatchedAddress>> =
@@ -54,6 +57,14 @@ export class HypersyncWorker {
       this.transactionService = new PostgresTransactionService();
     }
     return this.transactionService;
+  }
+  // Lazy initialization of transaction confirmation service
+  private getTransactionConfirmationService(): TransactionConfirmationService {
+    if (!this.transactionConfirmationService) {
+      this.transactionConfirmationService =
+        new TransactionConfirmationService();
+    }
+    return this.transactionConfirmationService;
   }
 
   // Validate and normalize Ethereum address
@@ -659,6 +670,10 @@ export class HypersyncWorker {
       matchedTransaction.id,
       TransactionStatus.CRYPTO_CONFIRMED,
       log.hash
+    );
+
+    this.getTransactionConfirmationService().processConfirmedEvmTransaction(
+      matchedTransaction.transactionId
     );
 
     console.log(

@@ -10,6 +10,7 @@ import { normalizeAddress } from "../utils/address.js";
 import { AddressWatcherService } from "../services/address-watcher.service.js";
 import { BaseController } from "./base.controller.js";
 import { BankAccountService } from "../services/bank-account.service.js";
+import { WalletTransferService } from "../services/wallet-transfer.service.js";
 
 export class TransactionController extends BaseController {
   private transactionService: PostgresTransactionService;
@@ -49,6 +50,48 @@ export class TransactionController extends BaseController {
     const path = `m/44'/60'/0'/0/${userID}`;
     const ethWallet = HDNodeWallet.fromMnemonic(ethMnemonic, path);
     return ethWallet.address;
+  }
+
+  /**
+   * Gets the source address for a user on a specific chain
+   * @param userId - The user ID
+   * @param sourceChain - The blockchain name
+   * @returns Promise<string> The user's address on the specified chain
+   * @throws Error if chain is unsupported or address cannot be retrieved
+   */
+  private async getSourceAddress(
+    userId: string,
+    sourceChain: string
+  ): Promise<string> {
+    const supportedChains = [
+      "ethereum",
+      "bsc",
+      "polygon",
+      "arbitrum",
+      "optimism",
+      "avalanche",
+      "base",
+      "sepolia",
+    ];
+
+    if (!supportedChains.includes(sourceChain)) {
+      throw new Error("Unsupported source chain");
+    }
+
+    const result = await WalletTransferService.getUserDeterministicAddress({
+      userId,
+      chainName: sourceChain,
+    });
+
+    if (!result.success) {
+      throw new Error(result.error || "Failed to get user address");
+    }
+
+    if (!result.address) {
+      throw new Error("No address returned from service");
+    }
+
+    return result.address;
   }
 
   // Create a fiat-to-crypto transaction
@@ -203,22 +246,18 @@ export class TransactionController extends BaseController {
 
       // Generate address for receiving crypto
       let sourceAddress: string;
-      switch (sourceChain) {
-        case "ethereum":
-        case "bsc":
-        case "polygon":
-        case "arbitrum":
-        case "optimism":
-        case "avalanche":
-        case "base":
-        case "sepolia":
-          sourceAddress = await this.generateEthereumAddressFromMnemonic(
-            userId
-          );
-          break;
-
-        default:
-          return this.sendError(res, "Unsupported source chain");
+      try {
+        sourceAddress = await this.getSourceAddress(
+          userId.toString(),
+          sourceChain
+        );
+      } catch (error) {
+        return this.sendError(
+          res,
+          error instanceof Error
+            ? error.message
+            : "Failed to get source address"
+        );
       }
 
       // Validate sourceAmount is a valid number

@@ -24,7 +24,7 @@ export const CHAIN_TOKEN_CONFIG: Record<string, ChainConfig> = {
     chainId: 1,
     name: "Ethereum Mainnet",
     hypersyncUrl: "https://eth.hypersync.xyz",
-    rpcUrl: "https://eth.llamarpc.com",
+    rpcUrl: `https://eth-mainnet.alchemyapi.io/v2/${process.env.ALCHEMY_KEY}`,
     tokens: {
       USDT: {
         symbol: "USDT",
@@ -63,7 +63,7 @@ export const CHAIN_TOKEN_CONFIG: Record<string, ChainConfig> = {
     chainId: 11155111,
     name: "Ethereum Sepolia Testnet",
     hypersyncUrl: "https://sepolia.hypersync.xyz",
-    rpcUrl: "https://sepolia.infura.io/v3/YOUR_KEY",
+    rpcUrl: `https://eth-sepolia.g.alchemy.com/v2/${process.env.ALCHEMY_KEY}`,
     tokens: {
       USDC: {
         symbol: "USDC",
