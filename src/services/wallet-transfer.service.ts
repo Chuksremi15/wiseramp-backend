@@ -1,24 +1,16 @@
-import { ethers, HDNodeWallet, Mnemonic } from "ethers";
+import { ethers } from "ethers";
 import { TokenConfigUtils } from "../utils/token-config";
 import { deployedContracts } from "../abis/wallet-factory";
 
-// Token configuration
-export const TOKEN_CONFIG = {
-  SOL: {
-    type: "native",
-    decimals: 9,
-    mintAddress: null,
-  },
-  USDC: {
-    type: "spl",
-    decimals: 6,
-    mintAddress: "Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr",
-  },
-} as const;
-
-export type TokenType = keyof typeof TOKEN_CONFIG;
-
 export class WalletTransferService {
+  // Cache for contract instances to avoid recreating them
+  private static contractCache = new Map<
+    string,
+    {
+      walletFactoryContract: ethers.Contract;
+    }
+  >();
+
   /**
    * Get provider for a specific chain
    */
@@ -32,155 +24,90 @@ export class WalletTransferService {
     return new ethers.JsonRpcProvider(chainConfig?.rpcUrl);
   }
 
-  /**
-   * Transfer ETH from user wallet to hot wallet
-   */
-  static async transferEthToHotWallet(
-    userId: number,
-    fromAddress: string,
-    amount: number,
-    chainName: string = "sepolia"
-  ): Promise<{
-    success: boolean;
-    txHash?: string;
-    transferFee?: string;
-    error?: string;
-  }> {
-    try {
-      const { ETH_HOT_WALLET_ADDRESS, MNEMONIC } = process.env;
-
-      if (!ETH_HOT_WALLET_ADDRESS || !MNEMONIC) {
-        return {
-          success: false,
-          error: "ETH hot wallet address or mnemonic not configured",
-        };
-      }
-
-      // Derive user's wallet from mnemonic
-      const mnemonic = Mnemonic.fromPhrase(MNEMONIC);
-      const hdWallet = HDNodeWallet.fromMnemonic(
-        mnemonic,
-        `m/44'/60'/0'/0/${userId}`
-      );
-
-      // Verify the derived wallet matches the fromAddress
-      if (hdWallet.address.toLowerCase() !== fromAddress.toLowerCase()) {
-        return {
-          success: false,
-          error: `Derived wallet address ${hdWallet.address} does not match fromAddress ${fromAddress}`,
-        };
-      }
-
-      const provider = this.getProvider(chainName);
-      const wallet = hdWallet.connect(provider);
-      const amountInWei = ethers.parseEther(amount.toString());
-
-      // Get current gas price
-      const feeData = await provider.getFeeData();
-      const gasPrice = feeData.gasPrice || ethers.parseUnits("20", "gwei");
-
-      // Estimate gas for the transaction
-      const gasLimit = await provider.estimateGas({
-        to: ETH_HOT_WALLET_ADDRESS,
-        value: amountInWei,
-        from: wallet.address,
-      });
-
-      const gasCost = gasPrice * gasLimit;
-      const totalCost = amountInWei + gasCost;
-
-      // Check if wallet has enough balance
-      const balance = await provider.getBalance(wallet.address);
-      if (balance < amountInWei) {
-        return {
-          success: false,
-          error: `Insufficient balance. Required: ${ethers.formatEther(
-            amountInWei
-          )} ETH, Available: ${ethers.formatEther(balance)} ETH`,
-        };
-      }
-
-      console.log(
-        `[ETH_TO_HOT_WALLET] Transferring ${amount} ETH from ${fromAddress} to hot wallet`
-      );
-
-      // Add 10% buffer to gas cost to account for price fluctuations
-      const gasBuffer = gasCost / 10n; // 10% buffer
-      const totalGasCostWithBuffer = gasCost + gasBuffer;
-      const remaindedOfGasFeeSubstract = amountInWei - totalGasCostWithBuffer;
-
-      // Ensure we have a positive amount to send
-      if (remaindedOfGasFeeSubstract <= 0n) {
-        return {
-          success: false,
-          error: `Insufficient balance after gas costs. Required gas (with buffer): ${ethers.formatEther(
-            totalGasCostWithBuffer
-          )} ETH, Available: ${ethers.formatEther(amountInWei)} ETH`,
-        };
-      }
-
-      // Send transaction
-      const tx = await wallet.sendTransaction({
-        to: ETH_HOT_WALLET_ADDRESS,
-        value: remaindedOfGasFeeSubstract,
-        gasPrice: gasPrice,
-        gasLimit: gasLimit,
-      });
-
-      // Wait for confirmation
-      const receipt = await tx.wait();
-
-      if (!receipt) {
-        return {
-          success: false,
-          error: "Transaction receipt not available",
-        };
-      }
-
-      const gasPrice_ = (receipt as any).effectiveGasPrice ?? receipt.gasPrice; // pick whichever exists
-      const actualGasCost = receipt.gasUsed * gasPrice_;
-
-      const transferFee = ethers.formatEther(actualGasCost);
-
-      console.log(`[ETH_TO_HOT_WALLET] Transaction successful: ${tx.hash}`);
-
-      return {
-        success: true,
-        txHash: tx.hash,
-        transferFee: transferFee,
-      };
-    } catch (error) {
-      console.error(
-        "[ETH_TO_HOT_WALLET] Error transferring ETH to hot wallet:",
-        error
-      );
-      return {
-        success: false,
-        error: `ETH hot wallet transfer failed: ${error}`,
-      };
-    }
-  }
-
-  /**
-   * Derive a Ethereum Keypair for a given userId using the mnemonic.
-   */
-  private static getUserEthWallet(
-    userId: number,
-    chainName: string = "sepolia"
-  ): ethers.Wallet {
-    const mnemonic = process.env.MNEMONIC!;
-    const ethMnemonic = Mnemonic.fromPhrase(mnemonic);
-    const path = `m/44'/60'/0'/0/${userId}`;
-    const ethWallet = HDNodeWallet.fromMnemonic(ethMnemonic, path);
-    const provider = this.getProvider(chainName);
-    return new ethers.Wallet(ethWallet.privateKey, provider);
-  }
-
-  static async setUpContract({ chainName }: { chainName: string }): Promise<
+  static async getWalletFactoryContract({
+    chainName,
+  }: {
+    chainName: string;
+  }): Promise<
     | {
         success: true;
-        sweeperWallet: ethers.Wallet;
+
         walletFactoryContract: ethers.Contract;
+      }
+    | {
+        success: false;
+        error: string;
+      }
+  > {
+    // Check if contract is already cached
+    const cached = this.contractCache.get(chainName);
+    if (cached) {
+      return {
+        success: true,
+        ...cached,
+      };
+    }
+
+    if (!process.env.SWEEPER_PRIVATE_KEY) {
+      return {
+        success: false,
+        error: "Sweeper private key not found",
+      };
+    }
+
+    const provider = this.getProvider(chainName);
+    const sweeperWallet = new ethers.Wallet(
+      process.env.SWEEPER_PRIVATE_KEY!,
+      provider
+    );
+
+    const chainConfig = TokenConfigUtils.getChainConfig(chainName);
+
+    if (!chainConfig) {
+      return {
+        success: false,
+        error: "Chain configuration not found",
+      };
+    }
+
+    // Get the contract configuration for the chain
+    const contractConfig =
+      deployedContracts[chainConfig.chainId as keyof typeof deployedContracts];
+
+    if (!contractConfig) {
+      return {
+        success: false,
+        error: `No contract deployed on chain ${chainName} (chainId: ${chainConfig.chainId})`,
+      };
+    }
+
+    const walletFactoryContract = new ethers.Contract(
+      contractConfig.WalletFactory.address,
+      contractConfig.WalletFactory.abi as any,
+      sweeperWallet
+    );
+
+    // Cache the contract for future use
+    const contractInstance = {
+      walletFactoryContract,
+    };
+    this.contractCache.set(chainName, contractInstance);
+
+    return {
+      success: true,
+      ...contractInstance,
+    };
+  }
+  static async getWalletContract({
+    chainName,
+    walletAddress,
+  }: {
+    chainName: string;
+    walletAddress: string;
+  }): Promise<
+    | {
+        success: true;
+        walletContract: ethers.Contract;
       }
     | {
         success: false;
@@ -205,7 +132,7 @@ export class WalletTransferService {
     if (!chainConfig) {
       return {
         success: false,
-        error: "Sweeper private key not found",
+        error: "Chain configuration not found",
       };
     }
 
@@ -220,17 +147,196 @@ export class WalletTransferService {
       };
     }
 
-    const walletFactoryContract = new ethers.Contract(
-      contractConfig.WalletFactory.address,
-      contractConfig.WalletFactory.abi,
+    const walletContract = new ethers.Contract(
+      walletAddress,
+      contractConfig.SweepWallet.abi as any,
       sweeperWallet
     );
 
     return {
       success: true,
-      sweeperWallet,
-      walletFactoryContract,
+      walletContract,
     };
+  }
+
+  static async triggerSweep({
+    chainName,
+    userId,
+    tokenSymbol,
+    sourceAddress,
+  }: {
+    chainName: string;
+    userId: string;
+    tokenSymbol: string;
+    sourceAddress: string;
+  }): Promise<{
+    success: boolean;
+    txHash?: string;
+    transferFee?: string;
+    error?: string;
+  }> {
+    try {
+      const provider = this.getProvider(chainName);
+
+      const salt = this.generateUserSalt(userId);
+
+      const contractSetup = await this.getWalletFactoryContract({
+        chainName,
+      });
+
+      if (!contractSetup.success) {
+        return {
+          success: false,
+          error: contractSetup.error,
+        };
+      }
+
+      // Determine token address - use address(0) for ETH, actual address for ERC20
+      let tokenAddress;
+      if (tokenSymbol.toLowerCase() === "eth") {
+        tokenAddress = ethers.ZeroAddress; // address(0) for ETH
+      } else {
+        tokenAddress = TokenConfigUtils.getTokenInfo(
+          chainName,
+          tokenSymbol
+        )?.address;
+        if (!tokenAddress) {
+          return {
+            success: false,
+            error: `Token address not found for ${tokenSymbol} on ${chainName}`,
+          };
+        }
+      }
+
+      if (!process.env.VAULT_ADDRESS) {
+        return {
+          success: false,
+          error: "VAULT_ADDRESS not configured in environment",
+        };
+      }
+
+      const { walletFactoryContract } = contractSetup;
+
+      const predictedAddress =
+        await walletFactoryContract.getDeterministicAddress(salt);
+
+      const code = await provider.getCode(predictedAddress);
+
+      let tx;
+
+      if (code === "0x") {
+        // Wallet doesn't exist yet - deploy and sweep in one transaction
+        console.log(
+          `[Sweeper] Deploying and sweeping wallet for user ${userId}, token: ${tokenSymbol}`
+        );
+
+        // 1. Estimate Gas
+        const gasLimit = await walletFactoryContract.deployAndSweep.estimateGas(
+          salt,
+          tokenAddress,
+          process.env.VAULT_ADDRESS
+        );
+
+        // 2. Send the deploy and sweep transaction
+        tx = await walletFactoryContract.deployAndSweep(
+          salt,
+          tokenAddress,
+          process.env.VAULT_ADDRESS,
+          {
+            gasLimit: gasLimit + BigInt(20000), // Add a 20k buffer
+          }
+        );
+
+        console.log(`[Sweeper] Deploy and sweep transaction sent: ${tx.hash}`);
+        console.log(
+          `[Sweeper] SUCCESS: Deployed wallet and swept ${tokenSymbol} from ${sourceAddress} to vault!`
+        );
+      } else {
+        // Wallet already exists - just sweep
+        console.log(
+          `[Sweeper] Wallet already exists, sweeping ${tokenSymbol} for user ${userId}`
+        );
+
+        // Get the wallet contract to call sweep directly
+        const walletContractSetup = await this.getWalletContract({
+          chainName,
+          walletAddress: predictedAddress,
+        });
+
+        if (!walletContractSetup.success) {
+          return {
+            success: false,
+            error: walletContractSetup.error,
+          };
+        }
+
+        const { walletContract } = walletContractSetup;
+
+        // Call the appropriate sweep method based on token type
+        if (tokenSymbol.toLowerCase() === "eth") {
+          // 1. Estimate Gas for ETH sweep
+          const gasLimit = await walletContract.sweepETH.estimateGas(
+            process.env.VAULT_ADDRESS
+          );
+
+          // 2. Sweep ETH
+          tx = await walletContract.sweepETH(process.env.VAULT_ADDRESS, {
+            gasLimit: gasLimit + BigInt(20000),
+          });
+        } else {
+          // 1. Estimate Gas for ERC20 sweep
+          const gasLimit = await walletContract.sweep.estimateGas(
+            tokenAddress,
+            process.env.VAULT_ADDRESS
+          );
+
+          // 2. Sweep ERC20 token
+          tx = await walletContract.sweep(
+            tokenAddress,
+            process.env.VAULT_ADDRESS,
+            {
+              gasLimit: gasLimit + BigInt(20000),
+            }
+          );
+        }
+
+        console.log(`[Sweeper] Sweep transaction sent: ${tx.hash}`);
+        console.log(
+          `[Sweeper] SUCCESS: Swept ${tokenSymbol} from ${sourceAddress} to vault!`
+        );
+      }
+
+      const receipt = await tx.wait();
+
+      return {
+        success: true,
+        txHash: tx.hash,
+        transferFee: receipt
+          ? ethers.formatEther(
+              receipt.gasUsed *
+                (receipt.effectiveGasPrice || receipt.gasPrice || 0n)
+            )
+          : undefined,
+      };
+    } catch (error) {
+      console.error(
+        `[Sweeper] FAILED to sweep ${sourceAddress}:`,
+        error instanceof Error ? error.message : error
+      );
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  /**
+   * Generate a deterministic salt for a user
+   * @param userId - The user ID
+   * @returns The salt hash for the user
+   */
+  private static generateUserSalt(userId: string): string {
+    return ethers.id(`WISERAMP_USER_SALT:${userId}`);
   }
 
   static async getUserDeterministicAddress({
@@ -242,12 +348,13 @@ export class WalletTransferService {
   }): Promise<{
     success: boolean;
     address?: string;
+    salt?: string;
     error?: string;
   }> {
     try {
-      const salt = ethers.id(`WISERAMP_USER_SALT:${userId}`);
+      const salt = this.generateUserSalt(userId);
 
-      const contractSetup = await this.setUpContract({
+      const contractSetup = await this.getWalletFactoryContract({
         chainName,
       });
 
@@ -266,6 +373,7 @@ export class WalletTransferService {
       return {
         success: true,
         address: predictedAddress,
+        salt,
       };
     } catch (error) {
       console.error("[GET_DETERMINISTIC_ADDRESS] Error:", error);
@@ -362,84 +470,6 @@ export class WalletTransferService {
         error: `Failed to check ${tokenSymbol} balance: ${
           error instanceof Error ? error.message : error
         }`,
-      };
-    }
-  }
-
-  private static toFixed18(num: number | string): string {
-    // Convert to number first to handle scientific notation properly
-    const numValue = typeof num === "string" ? parseFloat(num) : num;
-    // Use toFixed to convert to decimal string, then remove trailing zeros
-    return numValue.toFixed(18).replace(/\.?0+$/, "");
-  }
-
-  /**
-   * Transfer ETH directly from hot wallet (not using vault contract)
-   */
-  static async transferEthFromHotWallet(
-    toAddress: string,
-    amount: number,
-    chainName: string = "sepolia"
-  ): Promise<{
-    success: boolean;
-    txHash?: string;
-    transferFee?: string;
-    error?: string;
-  }> {
-    try {
-      const provider = this.getProvider(chainName);
-      // Create a wallet with the hot wallet private key
-      const hotWallet = new ethers.Wallet(
-        process.env.ETH_HOT_WALLET_PRIVATE_KEY!,
-        provider
-      );
-
-      const amountStr = this.toFixed18(amount);
-      const amountInWei = ethers.parseEther(amountStr);
-
-      console.log(
-        `[ETH_HOT_WALLET] Transferring ${amount} ETH from hot wallet to ${toAddress}`
-      );
-
-      // Create transaction object
-      const tx = await hotWallet.sendTransaction({
-        to: toAddress,
-        value: amountInWei,
-      });
-
-      console.log(`[ETH_HOT_WALLET] Transaction sent: ${tx.hash}`);
-
-      // Wait for confirmation
-      const receipt = await tx.wait();
-
-      if (receipt && receipt.status === 1) {
-        const gasPrice_ =
-          (receipt as any).effectiveGasPrice ?? receipt.gasPrice; // pick whichever exists
-        const actualGasCost = receipt.gasUsed * gasPrice_;
-
-        const transferFee = ethers.formatEther(actualGasCost);
-
-        console.log(`[ETH_HOT_WALLET] Transaction confirmed: ${tx.hash}`);
-
-        return {
-          success: true,
-          txHash: tx.hash,
-          transferFee,
-        };
-      } else {
-        return {
-          success: false,
-          error: "ETH hot wallet transfer failed",
-        };
-      }
-    } catch (error) {
-      console.error(
-        "[ETH_HOT_WALLET] Error transferring ETH from hot wallet:",
-        error
-      );
-      return {
-        success: false,
-        error: `ETH hot wallet transfer failed: ${error}`,
       };
     }
   }

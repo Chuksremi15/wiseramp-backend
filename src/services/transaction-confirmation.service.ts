@@ -3,6 +3,7 @@ import { Chain, TransactionStatus } from "../shared/types.js";
 import { WalletTransferService } from "./wallet-transfer.service.js";
 import { Transaction } from "../db/schema.js";
 import { TokenConfigUtils } from "../utils/token-config.js";
+import { SweeperQueueService } from "./sweeper-queue.service.js";
 
 export class TransactionConfirmationService {
   private transactionService: PostgresTransactionService;
@@ -115,8 +116,6 @@ export class TransactionConfirmationService {
         transaction.sourceCurrency
       );
 
-      console.log("tokenInfo", tokenInfo);
-
       //2. Check if the address actually has the expected balance
       //Note: WalletTransferService needs to be imported
       const balanceCheck = await WalletTransferService.verifyTokenBalance(
@@ -139,24 +138,40 @@ export class TransactionConfirmationService {
         `[CONFIRMATION] Balance verified: ${transaction.sourceAddress} has ${balanceCheck.balance} ${transaction.sourceCurrency}`
       );
 
-      // Note: TransferQueueService needs to be imported
-      // const queueResult = await TransferQueueService.queueTransfer(
-      //   transaction.transactionId,
-      //   transaction.userId,
-      //   address,
-      //   Number(transaction.sourceAmount),
-      //   "ETH_TO_HOT_WALLET"
-      // );
+      // Validate required fields before queuing
+      if (
+        !transaction.sourceAddress ||
+        !transaction.sourceChain ||
+        !transaction.sourceCurrency
+      ) {
+        return {
+          success: false,
+          error:
+            "Missing required fields: sourceAddress, sourceChain, or sourceCurrency",
+        };
+      }
 
-      // if (!queueResult.success) {
-      //   console.error(
-      //     `[CONFIRMATION] Failed to queue ETH transfer: ${queueResult.error}`
-      //   );
-      // } else {
-      //   console.log(
-      //     `[CONFIRMATION] ETH transfer queued for background processing, proceeding to destination transfer`
-      //   );
-      // }
+      // Note: SweeperQueueService needs to be imported
+      const queueResult = await SweeperQueueService.queueTransfer({
+        transactionId: transaction.transactionId,
+        userId: transaction.userId,
+        fromAddress: transaction.sourceAddress,
+        amount: transaction.sourceAmount,
+        sourceChain: transaction.sourceChain,
+        sourceCurrency: transaction.sourceCurrency,
+      });
+
+      if (!queueResult.success) {
+        console.error(
+          `[CONFIRMATION] ${transaction.sourceCurrency.toUpperCase()} Failed to queue transfer: ${
+            queueResult.error
+          }`
+        );
+      } else {
+        console.log(
+          `[CONFIRMATION] ${transaction.sourceCurrency.toUpperCase()} transfer queued for background processing, proceeding to destination transfer`
+        );
+      }
 
       if (
         !transaction.destinationAddress &&

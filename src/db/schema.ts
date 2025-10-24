@@ -24,6 +24,13 @@ export const transactionStatusEnum = pgEnum(
   Object.values(TransactionStatus) as [string, ...string[]]
 );
 
+export const queueStatusEnum = pgEnum("queue_status", [
+  "PENDING",
+  "PROCESSING",
+  "COMPLETED",
+  "FAILED",
+]);
+
 // Types for accounts field
 export type Account = {
   bankCode: string;
@@ -215,6 +222,45 @@ export const UserAddress = pgTable("user_address", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+// Transfer Queue table
+export const transferQueue = pgTable(
+  "transfer_queue",
+  {
+    id: serial("id").primaryKey(),
+    transactionId: text("transaction_id")
+      .notNull()
+      .references(() => transactions.transactionId),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id),
+    fromAddress: text("from_address").notNull(),
+    amount: decimal("amount", { precision: 20, scale: 8 }).notNull(),
+    status: queueStatusEnum("status").notNull().default("PENDING"),
+    retryCount: integer("retry_count").notNull().default(0),
+    maxRetries: integer("max_retries").notNull().default(3),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    lastAttemptAt: timestamp("last_attempt_at"),
+    completedAt: timestamp("completed_at"),
+    sourceChain: chainEnum("source_chain"),
+    sourceCurrency: text("source_currency").notNull(),
+    errorMessage: text("error_message"),
+    txHash: text("tx_hash"),
+    transferFee: text("transfer_fee"),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("transfer_queue_transaction_id_idx").on(table.transactionId),
+    index("transfer_queue_status_idx").on(table.status),
+    index("transfer_queue_user_id_idx").on(table.userId),
+    index("transfer_queue_created_at_idx").on(table.createdAt),
+    index("transfer_queue_status_created_idx").on(
+      table.status,
+      table.createdAt
+    ),
+    index("transfer_queue_retry_count_idx").on(table.retryCount, table.status),
+  ]
+);
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 
@@ -226,3 +272,7 @@ export type NewBankAccount = typeof BankAccount.$inferInsert;
 
 export type UserAddressType = typeof UserAddress.$inferSelect;
 export type NewUserAddress = typeof UserAddress.$inferInsert;
+
+// Transfer Queue types
+export type TransferQueue = typeof transferQueue.$inferSelect;
+export type NewTransferQueue = typeof transferQueue.$inferInsert;

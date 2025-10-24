@@ -5,7 +5,6 @@ import { getTokenEquivalent, PRICE_FEEDS } from "../utils/price-feed.js";
 import { PostgresUserService } from "../services/user.service.js";
 // import { BankAccountService } from "../services/bank-account.service.js";
 import Decimal from "decimal.js";
-import { HDNodeWallet, Mnemonic } from "ethers";
 import { normalizeAddress } from "../utils/address.js";
 import { AddressWatcherService } from "../services/address-watcher.service.js";
 import { BaseController } from "./base.controller.js";
@@ -35,21 +34,6 @@ export class TransactionController extends BaseController {
     }
 
     return numericAmount;
-  }
-
-  /**
-   * Generates an Ethereum address from the mnemonic in the environment variable.
-   * @returns {Promise<string>} The generated Ethereum address.
-   */
-  private async generateEthereumAddressFromMnemonic(
-    userID: number
-  ): Promise<string> {
-    const mnemonic = process.env.MNEMONIC!;
-    const ethMnemonic = Mnemonic.fromPhrase(mnemonic);
-    // BIP44 path for ETH: m/44'/60'/0'/0/{userID}
-    const path = `m/44'/60'/0'/0/${userID}`;
-    const ethWallet = HDNodeWallet.fromMnemonic(ethMnemonic, path);
-    return ethWallet.address;
   }
 
   /**
@@ -386,11 +370,20 @@ export class TransactionController extends BaseController {
         .toNumber();
 
       // Generate source address based on chain
+      // Generate address for receiving crypto
       let sourceAddress: string;
-      if (sourceChain === "ethereum") {
-        sourceAddress = await this.generateEthereumAddressFromMnemonic(userId);
-      } else {
-        return this.sendError(res, "Unsupported source chain");
+      try {
+        sourceAddress = await this.getSourceAddress(
+          userId.toString(),
+          sourceChain
+        );
+      } catch (error) {
+        return this.sendError(
+          res,
+          error instanceof Error
+            ? error.message
+            : "Failed to get source address"
+        );
       }
 
       await this.watchService.addAddressToWatcher({
