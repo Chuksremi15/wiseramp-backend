@@ -3,13 +3,13 @@ import { PostgresTransactionService } from "../services/transaction.service.js";
 import { TransactionStatus } from "../shared/types.js";
 import { getTokenEquivalent, PRICE_FEEDS } from "../utils/price-feed.js";
 import { PostgresUserService } from "../services/user.service.js";
-// import { BankAccountService } from "../services/bank-account.service.js";
 import Decimal from "decimal.js";
 import { normalizeAddress } from "../utils/address.js";
 import { AddressWatcherService } from "../services/address-watcher.service.js";
 import { BaseController } from "./base.controller.js";
 import { BankAccountService } from "../services/bank-account.service.js";
 import { WalletTransferService } from "../services/wallet-transfer.service.js";
+import { MonifyService } from "../services/monify-service.js";
 
 export class TransactionController extends BaseController {
   private transactionService: PostgresTransactionService;
@@ -123,13 +123,34 @@ export class TransactionController extends BaseController {
 
       // Check if user has accounts configured
       if (!user.reserveAccounts || user.reserveAccounts.length === 0) {
-        return this.sendError(
-          res,
-          "User has no bank accounts configured. Please set up a reserve account first."
-        );
+        try {
+          const monifyService = new MonifyService();
+          await monifyService.createReserveAccount({ email: user.email });
+
+          // Refetch user to get updated reserve accounts
+          const updatedUser = await this.userService.findByUserId(id);
+          if (
+            !updatedUser?.reserveAccounts ||
+            updatedUser.reserveAccounts.length === 0
+          ) {
+            return this.sendError(
+              res,
+              "Failed to create reserve account. Please try again."
+            );
+          }
+
+          // Update user reference for the rest of the function
+          Object.assign(user, updatedUser);
+        } catch (error) {
+          console.error("Error creating reserve account:", error);
+          return this.sendError(
+            res,
+            "Failed to create reserve account. Please try again later."
+          );
+        }
       }
 
-      const { accountNumber, bankName, accountName } = user.reserveAccounts[0];
+      const { accountNumber, bankName, accountName } = user.reserveAccounts![0];
 
       // Validate sourceAmount is a valid number
       let numericSourceAmount: number;

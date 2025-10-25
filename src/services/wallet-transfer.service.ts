@@ -99,6 +99,7 @@ export class WalletTransferService {
       ...contractInstance,
     };
   }
+
   static async getWalletContract({
     chainName,
     walletAddress,
@@ -389,6 +390,359 @@ export class WalletTransferService {
         error: `Failed to get deterministic address: ${
           error instanceof Error ? error.message : error
         }`,
+      };
+    }
+  }
+
+  static async sendStablesToAddress({
+    chainName,
+    tokenSymbol,
+    destinationAddress,
+    amount,
+  }: {
+    chainName: string;
+    tokenSymbol: string;
+    destinationAddress: string;
+    amount: string;
+  }): Promise<{
+    success: boolean;
+    txHash?: string;
+    transferFee?: string;
+    error?: string;
+  }> {
+    try {
+      if (!process.env.VAULT_PRIVATE_KEY) {
+        return {
+          success: false,
+          error: "Vault private key not found in environment",
+        };
+      }
+
+      if (!process.env.VAULT_ADDRESS) {
+        return {
+          success: false,
+          error: "Vault address not configured in environment",
+        };
+      }
+
+      // Validate destination address
+      if (!ethers.isAddress(destinationAddress)) {
+        return {
+          success: false,
+          error: "Invalid destination address format",
+        };
+      }
+
+      // Reject ETH transfers - this method is only for stablecoins
+      if (tokenSymbol.toLowerCase() === "eth") {
+        return {
+          success: false,
+          error:
+            "ETH transfers not supported in this method. Use a separate method for ETH transfers.",
+        };
+      }
+
+      const provider = this.getProvider(chainName);
+      const vaultWallet = new ethers.Wallet(
+        process.env.VAULT_PRIVATE_KEY,
+        provider
+      );
+
+      // Get token information
+      const tokenInfo = TokenConfigUtils.getTokenInfo(chainName, tokenSymbol);
+      if (!tokenInfo) {
+        return {
+          success: false,
+          error: `Stablecoin ${tokenSymbol} not supported on ${chainName}`,
+        };
+      }
+
+      // Parse amount with proper decimals - truncate to token's decimal precision
+      const truncatedAmount = parseFloat(amount).toFixed(tokenInfo.decimals);
+      const amountInWei = ethers.parseUnits(
+        truncatedAmount,
+        tokenInfo.decimals
+      );
+
+      // Handle ERC-20 stablecoin transfer
+      const erc20Abi = [
+        "function transfer(address to, uint256 amount) returns (bool)",
+        "function balanceOf(address owner) view returns (uint256)",
+        "function decimals() view returns (uint8)",
+      ];
+
+      const tokenContract = new ethers.Contract(
+        tokenInfo.address,
+        erc20Abi,
+        vaultWallet
+      );
+
+      // Check vault token balance
+      const vaultBalance = await tokenContract.balanceOf(
+        process.env.VAULT_ADDRESS
+      );
+      if (vaultBalance < amountInWei) {
+        return {
+          success: false,
+          error: `Insufficient ${tokenSymbol} balance in vault. Required: ${amount}, Available: ${ethers.formatUnits(
+            vaultBalance,
+            tokenInfo.decimals
+          )}`,
+        };
+      }
+
+      // Estimate gas for the transfer
+      const gasLimit = await tokenContract.transfer.estimateGas(
+        destinationAddress,
+        amountInWei
+      );
+
+      // Execute the transfer
+      const tx = await tokenContract.transfer(destinationAddress, amountInWei, {
+        gasLimit: gasLimit + BigInt(20000), // Add buffer
+      });
+
+      console.log(
+        `[VAULT_TRANSFER] Sent ${amount} ${tokenSymbol} to ${destinationAddress}, tx: ${tx.hash}`
+      );
+
+      const receipt = await tx.wait();
+
+      return {
+        success: true,
+        txHash: tx.hash,
+        transferFee: receipt
+          ? ethers.formatEther(receipt.gasUsed * receipt.gasPrice)
+          : undefined,
+      };
+    } catch (error) {
+      console.error(
+        `[VAULT_TRANSFER] Failed to send ${tokenSymbol} to ${destinationAddress}:`,
+        error instanceof Error ? error.message : error
+      );
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  /**
+   * Send tokens to an address - routes to appropriate method based on token type
+   */
+  static async sendTokenToAddress({
+    chainName,
+    tokenSymbol,
+    destinationAddress,
+    amount,
+  }: {
+    chainName: string;
+    tokenSymbol: string;
+    destinationAddress: string;
+    amount: string;
+  }): Promise<{
+    success: boolean;
+    txHash?: string;
+    transferFee?: string;
+    error?: string;
+  }> {
+    try {
+      // Define stablecoins
+      const stablecoins = ["USDT", "USDC", "DAI", "BUSD"];
+
+      // Check if token is a stablecoin
+      if (stablecoins.includes(tokenSymbol.toUpperCase())) {
+        return await this.sendStablesToAddress({
+          chainName,
+          tokenSymbol,
+          destinationAddress,
+          amount,
+        });
+      } else {
+        // Route to sendNonStableTokenToAddress for ETH and other non-stable ERC20 tokens
+        return await this.sendNonStableTokenToAddress({
+          chainName,
+          tokenSymbol,
+          destinationAddress,
+          amount,
+        });
+      }
+    } catch (error) {
+      console.error(
+        `[TOKEN_ROUTER] Failed to route token transfer for ${tokenSymbol}:`,
+        error instanceof Error ? error.message : error
+      );
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  /**
+   * Send non-stable tokens (ETH and other ERC-20 tokens) to an address
+   */
+  static async sendNonStableTokenToAddress({
+    chainName,
+    tokenSymbol,
+    destinationAddress,
+    amount,
+  }: {
+    chainName: string;
+    tokenSymbol: string;
+    destinationAddress: string;
+    amount: string;
+  }): Promise<{
+    success: boolean;
+    txHash?: string;
+    transferFee?: string;
+    error?: string;
+  }> {
+    try {
+      if (!process.env.VAULT_PRIVATE_KEY) {
+        return {
+          success: false,
+          error: "Vault private key not found in environment",
+        };
+      }
+
+      if (!process.env.VAULT_ADDRESS) {
+        return {
+          success: false,
+          error: "Vault address not configured in environment",
+        };
+      }
+
+      // Validate destination address
+      if (!ethers.isAddress(destinationAddress)) {
+        return {
+          success: false,
+          error: "Invalid destination address format",
+        };
+      }
+
+      const provider = this.getProvider(chainName);
+      const vaultWallet = new ethers.Wallet(
+        process.env.VAULT_PRIVATE_KEY,
+        provider
+      );
+
+      // Handle ETH transfers
+      if (tokenSymbol.toLowerCase() === "eth") {
+        const amountInWei = ethers.parseEther(amount);
+
+        // Check vault ETH balance
+        const vaultBalance = await provider.getBalance(
+          process.env.VAULT_ADDRESS
+        );
+        if (vaultBalance < amountInWei) {
+          return {
+            success: false,
+            error: `Insufficient ETH balance in vault. Required: ${amount}, Available: ${ethers.formatEther(
+              vaultBalance
+            )}`,
+          };
+        }
+
+        // Send ETH transaction
+        const tx = await vaultWallet.sendTransaction({
+          to: destinationAddress,
+          value: amountInWei,
+        });
+
+        console.log(
+          `[VAULT_TRANSFER] Sent ${amount} ETH to ${destinationAddress}, tx: ${tx.hash}`
+        );
+
+        const receipt = await tx.wait();
+
+        return {
+          success: true,
+          txHash: tx.hash,
+          transferFee: receipt
+            ? ethers.formatEther(receipt.gasUsed * receipt.gasPrice)
+            : undefined,
+        };
+      } else {
+        // Handle non-stable ERC-20 tokens (WETH, WBTC, etc.)
+        const tokenInfo = TokenConfigUtils.getTokenInfo(chainName, tokenSymbol);
+        if (!tokenInfo) {
+          return {
+            success: false,
+            error: `Token ${tokenSymbol} not supported on ${chainName}`,
+          };
+        }
+
+        // Parse amount with proper decimals - truncate to token's decimal precision
+        const truncatedAmount = parseFloat(amount).toFixed(tokenInfo.decimals);
+        const amountInWei = ethers.parseUnits(
+          truncatedAmount,
+          tokenInfo.decimals
+        );
+
+        const erc20Abi = [
+          "function transfer(address to, uint256 amount) returns (bool)",
+          "function balanceOf(address owner) view returns (uint256)",
+          "function decimals() view returns (uint8)",
+        ];
+
+        const tokenContract = new ethers.Contract(
+          tokenInfo.address,
+          erc20Abi,
+          vaultWallet
+        );
+
+        // Check vault token balance
+        const vaultBalance = await tokenContract.balanceOf(
+          process.env.VAULT_ADDRESS
+        );
+        if (vaultBalance < amountInWei) {
+          return {
+            success: false,
+            error: `Insufficient ${tokenSymbol} balance in vault. Required: ${amount}, Available: ${ethers.formatUnits(
+              vaultBalance,
+              tokenInfo.decimals
+            )}`,
+          };
+        }
+
+        // Estimate gas for the transfer
+        const gasLimit = await tokenContract.transfer.estimateGas(
+          destinationAddress,
+          amountInWei
+        );
+
+        // Execute the transfer
+        const tx = await tokenContract.transfer(
+          destinationAddress,
+          amountInWei,
+          {
+            gasLimit: gasLimit + BigInt(20000), // Add buffer
+          }
+        );
+
+        console.log(
+          `[VAULT_TRANSFER] Sent ${amount} ${tokenSymbol} to ${destinationAddress}, tx: ${tx.hash}`
+        );
+
+        const receipt = await tx.wait();
+
+        return {
+          success: true,
+          txHash: tx.hash,
+          transferFee: receipt
+            ? ethers.formatEther(receipt.gasUsed * receipt.gasPrice)
+            : undefined,
+        };
+      }
+    } catch (error) {
+      console.error(
+        `[VAULT_TRANSFER] Failed to send ${tokenSymbol} to ${destinationAddress}:`,
+        error instanceof Error ? error.message : error
+      );
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
       };
     }
   }

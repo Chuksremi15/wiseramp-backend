@@ -5,6 +5,9 @@ import { MonifyService } from "../services/monify-service.js";
 import monifyAxios from "../services/monify-axios.service.js";
 import crypto from "crypto";
 import { PostgresTransactionService } from "../services/transaction.service.js";
+import { Transaction } from "../db/schema.js";
+import { TransactionStatus } from "../shared/types.js";
+import { WalletTransferService } from "../services/wallet-transfer.service.js";
 
 export class MonifyController extends BaseController {
   private userService: PostgresUserService;
@@ -161,19 +164,7 @@ export class MonifyController extends BaseController {
       try {
         const webhookData = req.body;
 
-        // Optional: Verify signature from Monnify (for security)
-        const signature = req.headers["monnify-signature"];
-        const computedSignature = crypto
-          .createHmac("sha512", process.env.MONNIFY_SECRET_KEY || "")
-          .update(JSON.stringify(webhookData))
-          .digest("hex");
-
-        if (signature !== computedSignature) {
-          console.error("Invalid signature");
-          return res.status(400).send("Invalid signature");
-        }
-
-        // Extract payment information from webhook
+        // Extract payment information from webhook early for idempotency
         const { eventType, eventData } = webhookData;
 
         // Validate webhook structure
@@ -184,12 +175,28 @@ export class MonifyController extends BaseController {
           return res.status(400).json({ message: "Invalid webhook structure" });
         }
 
+        // Optional: Verify signature from Monnify (for security)
+        const signature = req.headers["monnify-signature"];
+        if (signature && process.env.MONNIFY_SECRET_KEY) {
+          const computedSignature = crypto
+            .createHmac("sha512", process.env.MONNIFY_SECRET_KEY)
+            .update(JSON.stringify(webhookData))
+            .digest("hex");
+
+          if (signature !== computedSignature) {
+            console.error("Invalid signature");
+            return res.status(400).send("Invalid signature");
+          }
+        }
+
+        console.log(`📥 Processing webhook: ${eventType}`);
+
         // Handle different event types asynchronously (non-blocking)
         switch (eventType) {
           case "SUCCESSFUL_TRANSACTION":
-            // this.handleSuccessfulPayment(eventData).catch((error) => {
-            //   console.error("❌ Error processing successful payment:", error);
-            // });
+            this.handleSuccessfulPayment(eventData).catch((error) => {
+              console.error("❌ Error processing successful payment:", error);
+            });
             break;
           case "FAILED_TRANSACTION":
             this.handleFailedPayment(eventData).catch((error) => {
@@ -223,163 +230,177 @@ export class MonifyController extends BaseController {
   );
 
   // Handle successful payment
-  //   private async handleSuccessfulPayment(eventData: any): Promise<void> {
-  //     try {
-  //       const {
-  //         customer,
-  //         amountPaid,
-  //         transactionReference,
-  //         destinationAccountInformation,
-  //         paymentSourceInformation,
-  //         currency,
-  //         paidOn,
-  //       } = eventData;
+  private async handleSuccessfulPayment(eventData: any): Promise<void> {
+    try {
+      const { customer, amountPaid, transactionReference, paidOn } = eventData;
 
-  //       console.log("✅ Processing successful payment...");
+      console.log("✅ Processing successful payment...");
 
-  //       // Find user by email or account reference
-  //       let user = null;
-  //       if (customer?.email) {
-  //         user = await this.userService.findByEmail(customer.email);
-  //       }
+      // Find user by email or account reference
+      let user = null;
+      if (customer?.email) {
+        user = await this.userService.findByEmail(customer.email);
+      }
 
-  //       if (user) {
-  //         // Update user's account balance or transaction history
-  //         console.log(
-  //           `💳 Crediting ${amountPaid} ${currency} to user: ${user.email}`
-  //         );
-  //         console.log(
-  //           `🏦 From account: ${paymentSourceInformation?.[0]?.accountNumber} (${paymentSourceInformation?.[0]?.accountName})`
-  //         );
-  //         console.log(
-  //           `🎯 To account: ${destinationAccountInformation?.accountNumber} (${destinationAccountInformation?.bankName})`
-  //         );
-  //         console.log(`📅 Paid on: ${paidOn}`);
+      if (user) {
+        // Update user's account balance or transaction history
+        console.log(`📅 Paid on: ${paidOn}`);
 
-  //         // Find all pending transactions for this email and currency
-  //         const pendingTransactions =
-  //           await this.transactionService.getPendingTransactionsByChainAndEmail(
-  //             "fiat",
-  //             user.email
-  //           );
+        // Find all pending transactions for this email and currency
+        const pendingTransactions =
+          await this.transactionService.getPendingTransactionsByChainAndEmail(
+            "fiat",
+            user.email
+          );
 
-  //         let matchedTransaction: Transaction | null = null;
+        let matchedTransaction: Transaction | null = null;
 
-  //         for (const transaction of pendingTransactions) {
-  //           if (parseFloat(transaction.sourceAmount) === parseFloat(amountPaid)) {
-  //             matchedTransaction = transaction;
-  //             console.log(
-  //               `[Fiat] Matched transaction ${transaction.transactionId} with amount ${transaction.sourceAmount} NGN`
-  //             );
-  //             break;
-  //           }
-  //         }
+        console.log(
+          `[Fiat] Looking for amount: ${amountPaid} (type: ${typeof amountPaid})`
+        );
+        console.log(
+          `[Fiat] Found ${pendingTransactions.length} pending transactions`
+        );
 
-  //         // If no exact match, use the oldest transaction (FIFO)
-  //         if (!matchedTransaction) {
-  //           console.log(`[Fiat] No exact amount match`);
-  //           return;
-  //         } else {
-  //           // Update the matched transaction status
-  //           const updateSuccess =
-  //             await this.transactionService.updateFiatStatusByTransactionHash(
-  //               matchedTransaction.id,
-  //               TransactionStatus.FIAT_CONFIRMED,
-  //               transactionReference
-  //             );
+        for (const transaction of pendingTransactions) {
+          const transactionAmount = parseFloat(transaction.sourceAmount);
+          const paidAmount = parseFloat(amountPaid);
 
-  //           if (!updateSuccess) {
-  //             console.log(
-  //               `[Fait] Transaction for email ${matchedTransaction.userEmail} already being processed.`
-  //             );
-  //             return;
-  //           }
+          console.log(
+            `[Fiat] Comparing transaction ${transaction.transactionId}: ${transactionAmount} vs ${paidAmount}`
+          );
 
-  //           let destinationTransfer: {
-  //             success: boolean;
-  //             txHash?: string;
-  //             transferFee?: string;
-  //             error?: string;
-  //           };
+          if (Math.abs(transactionAmount - paidAmount) < 0.01) {
+            matchedTransaction = transaction;
+            console.log(
+              `[Fiat] Matched transaction ${transaction.transactionId} with amount ${transaction.sourceAmount} NGN`
+            );
+            break;
+          }
+        }
 
-  //           // Validate destination address exists
-  //           if (!matchedTransaction.destinationAddress) {
-  //             destinationTransfer = {
-  //               success: false,
-  //               error: "Missing destination address",
-  //             };
-  //           } else {
-  //             switch (matchedTransaction.destinationChain) {
-  //               case Chain.SOLANA: {
-  //                 destinationTransfer =
-  //                   await WalletTransferService.transferSolOrSPLTokenFromHotWallet(
-  //                     matchedTransaction.destinationAddress,
-  //                     Number(matchedTransaction.destinationAmount),
-  //                     matchedTransaction.destinationCurrency as TokenType
-  //                   );
-  //                 break;
-  //               }
-  //               case Chain.ETHEREUM: {
-  //                 destinationTransfer =
-  //                   await WalletTransferService.transferEthFromHotWallet(
-  //                     matchedTransaction.destinationAddress,
-  //                     Number(matchedTransaction.destinationAmount)
-  //                   );
-  //                 break;
-  //               }
-  //               case Chain.BITCOIN: {
-  //                 destinationTransfer =
-  //                   await WalletTransferService.transferBtcFromHotWallet(
-  //                     matchedTransaction.destinationAddress,
-  //                     Number(matchedTransaction.destinationAmount)
-  //                   );
-  //                 break;
-  //               }
+        console.log(
+          `[Fiat] matchedTransaction after loop:`,
+          matchedTransaction
+            ? `Found: ${matchedTransaction.transactionId}`
+            : "null"
+        );
 
-  //               default: {
-  //                 destinationTransfer = {
-  //                   success: false,
-  //                   error: "Destination chain does not exist",
-  //                 };
-  //               }
-  //             }
-  //           }
+        if (!matchedTransaction) {
+          console.log(`[Fiat] No exact amount match`);
+          return;
+        }
 
-  //           if (!destinationTransfer.success) {
-  //             // Update transaction status
-  //             await this.transactionService.updateTransactionFields(
-  //               matchedTransaction.id,
-  //               {
-  //                 status: TransactionStatus.FAILED,
-  //                 adminNotes: `${matchedTransaction.destinationChain} transfer failed: ${destinationTransfer.error}`,
-  //               }
-  //             );
-  //             return;
-  //           }
+        console.log(
+          `[Fiat] 🔍 Checking transaction status: ${matchedTransaction.status}`
+        );
+        console.log(`[Fiat] 🔍 Expected status: ${TransactionStatus.PENDING}`);
+        console.log(
+          `[Fiat] 🔍 Status comparison: ${
+            matchedTransaction.status === TransactionStatus.PENDING
+          }`
+        );
 
-  //           // 4. Update transaction status to completed
-  //           await this.transactionService.updateTransactionFields(
-  //             matchedTransaction.id,
-  //             {
-  //               status: TransactionStatus.COMPLETED,
-  //               destinationTransactionHash: destinationTransfer.txHash,
-  //               completedAt: new Date(),
-  //               adminNotes:
-  //                 "Transaction completed successfully - funds transferred to address",
-  //             }
-  //           );
-  //         }
-  //       } else {
-  //         console.log(
-  //           `⚠️ User not found for payment notification. 📧 Customer email: ${customer?.email}`
-  //         );
-  //         return;
-  //       }
-  //     } catch (error) {
-  //       console.error("Error handling successful payment:", error);
-  //       throw error;
-  //     }
-  //   }
+        // Check if transaction is already processed or being processed
+        if (matchedTransaction.status !== TransactionStatus.PENDING) {
+          console.log(
+            `[Fiat] ❌ Transaction ${matchedTransaction.transactionId} already processed with status: ${matchedTransaction.status}`
+          );
+          return;
+        }
+
+        console.log(
+          `[Fiat] ✅ Transaction status is PENDING, proceeding with update...`
+        );
+
+        // Update the matched transaction status with atomic operation
+        try {
+          await this.transactionService.updateFiatStatusTransactionHash(
+            matchedTransaction.id,
+            TransactionStatus.FIAT_CONFIRMED,
+            transactionReference
+          );
+        } catch (error) {
+          console.error(`[Fiat] ❌ Error updating transaction status:`, error);
+          return;
+        }
+
+        let destinationTransfer: {
+          success: boolean;
+          txHash?: string;
+          transferFee?: string;
+          error?: string;
+        };
+
+        // Validate all required destination fields exist
+        if (
+          !matchedTransaction.destinationAddress ||
+          !matchedTransaction.destinationChain ||
+          !matchedTransaction.destinationCurrency ||
+          !matchedTransaction.destinationAmount
+        ) {
+          console.log(`[Fiat] ❌ Missing required destination fields`);
+          destinationTransfer = {
+            success: false,
+            error:
+              "Missing required destination fields (address, chain, currency, or amount)",
+          };
+        } else {
+          try {
+            destinationTransfer =
+              await WalletTransferService.sendTokenToAddress({
+                chainName: matchedTransaction.destinationChain,
+                tokenSymbol: matchedTransaction.destinationCurrency,
+                destinationAddress: matchedTransaction.destinationAddress,
+                amount: matchedTransaction.destinationAmount,
+              });
+            console.log(
+              `[Fiat] 📊 Token transfer result:`,
+              destinationTransfer
+            );
+          } catch (error) {
+            console.error(`[Fiat] ❌ Error during token transfer:`, error);
+            destinationTransfer = {
+              success: false,
+              error: error instanceof Error ? error.message : String(error),
+            };
+          }
+        }
+
+        if (!destinationTransfer.success) {
+          // Update transaction status
+          await this.transactionService.updateTransactionFields(
+            matchedTransaction.id,
+            {
+              status: TransactionStatus.FAILED,
+              adminNotes: `${matchedTransaction.destinationChain} transfer failed: ${destinationTransfer.error}`,
+            }
+          );
+          return;
+        }
+
+        // Update transaction status to completed
+        await this.transactionService.updateTransactionFields(
+          matchedTransaction.id,
+          {
+            status: TransactionStatus.COMPLETED,
+            destinationTransactionHash: destinationTransfer.txHash,
+            completedAt: new Date(),
+            adminNotes:
+              "Transaction completed successfully - funds transferred to address",
+          }
+        );
+      } else {
+        console.log(
+          `⚠️ User not found for payment notification. 📧 Customer email: ${customer?.email}`
+        );
+        return;
+      }
+    } catch (error) {
+      console.error("Error handling successful payment:", error);
+      throw error;
+    }
+  }
 
   // Handle failed payment
   private async handleFailedPayment(eventData: any): Promise<void> {
@@ -391,7 +412,6 @@ export class MonifyController extends BaseController {
         amountPaid,
         currency,
         paymentStatus,
-        paymentDescription,
       } = eventData;
 
       console.log("❌ Processing failed payment...");
@@ -399,7 +419,7 @@ export class MonifyController extends BaseController {
       console.log(`📋 Transaction Reference: ${transactionReference}`);
       console.log(`📋 Payment Reference: ${paymentReference}`);
       console.log(`👤 Customer: ${customer?.name} (${customer?.email})`);
-      console.log(`📊 Status: ${paymentStatus}`);
+      console.log(`� Statuds: ${paymentStatus}`);
 
       // TODO: Implement failed payment logic:
       // - Log the failure
@@ -429,9 +449,9 @@ export class MonifyController extends BaseController {
       console.log(`💰 Reversed amount: ${amountPaid} ${currency}`);
       console.log(`💵 Settlement amount: ${settlementAmount}`);
       console.log(`📋 Transaction Reference: ${transactionReference}`);
-      console.log(`📋 Payment Reference: ${paymentReference}`);
-      console.log(`👤 Customer: ${customer?.name} (${customer?.email})`);
-      console.log(`📅 Originally paid on: ${paidOn}`);
+      console.log(`� Payment Re ference: ${paymentReference}`);
+      console.log(`� Customeer: ${customer?.name} (${customer?.email})`);
+      console.log(`� Originaelly paid on: ${paidOn}`);
 
       // TODO: Implement reversal logic:
       // - Reverse user balance if applicable
@@ -442,12 +462,4 @@ export class MonifyController extends BaseController {
       throw error;
     }
   }
-
-  // Optional: Verify webhook signature for security
-  // private verifyWebhookSignature(payload: any, signature: string): boolean {
-  //   // Implement signature verification based on Monify's documentation
-  //   // This typically involves creating a hash of the payload using a secret key
-  //   // and comparing it with the provided signature
-  //   return true; // Placeholder
-  // }
 }

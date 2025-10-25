@@ -52,15 +52,17 @@ export class PostgresTransactionService {
   ): Promise<string> {
     // 1. Comprehensive health check
     if (!transactionData.sourceChain) {
-      throw new Error("Source chain is required for payment monitoring");
+      throw new Error("Source chain is required");
     }
 
-    // 2. Start monitoring BEFORE creating transaction
-    const monitoringStarted = await this.startHypersyncMonitoring(
-      transactionData
-    );
-    if (!monitoringStarted) {
-      throw new Error("Failed to start payment monitoring");
+    // 2. Start monitoring BEFORE creating transaction (skip for fiat transactions)
+    if (transactionData.sourceChain !== "fiat") {
+      const monitoringStarted = await this.startHypersyncMonitoring(
+        transactionData
+      );
+      if (!monitoringStarted) {
+        throw new Error("Failed to start payment monitoring");
+      }
     }
 
     try {
@@ -80,8 +82,12 @@ export class PostgresTransactionService {
       console.log(`✅ Transaction ${result.id} created with monitoring active`);
       return result.id;
     } catch (error) {
-      // 4. Cleanup monitoring if transaction creation fails
-      if (transactionData.sourceAddress && transactionData.sourceChain) {
+      // 4. Cleanup monitoring if transaction creation fails (skip for fiat transactions)
+      if (
+        transactionData.sourceAddress &&
+        transactionData.sourceChain &&
+        transactionData.sourceChain !== "fiat"
+      ) {
         hypersyncWorker.removeAddress(
           transactionData.sourceAddress,
           transactionData.sourceChain
@@ -101,6 +107,12 @@ export class PostgresTransactionService {
     }
 
     const { sourceAddress, sourceChain, sourceCurrency } = transaction;
+
+    // Skip hypersync monitoring for fiat transactions
+    if (sourceChain === "fiat") {
+      console.log("Skipping hypersync monitoring for fiat transaction");
+      return true;
+    }
 
     try {
       if (sourceCurrency && sourceCurrency !== "ETH") {
@@ -351,7 +363,7 @@ export class PostgresTransactionService {
     return !!result;
   }
 
-  async updateFiatStatusByTransactionHash(
+  async updateFiatStatusTransactionHash(
     id: string,
     status: TransactionStatus,
     sourceTransactionHash: string
