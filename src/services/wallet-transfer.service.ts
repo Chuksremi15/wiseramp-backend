@@ -1,8 +1,8 @@
 import { ethers } from "ethers";
 import axios from "axios";
-import { TokenConfigUtils } from "../utils/token-config";
-import { deployedContracts } from "../abis/wallet-factory";
-import { PostgresUserService } from "./user.service";
+import { TokenConfigUtils } from "../utils/token-config.js";
+import { deployedContracts } from "../abis/wallet-factory.js";
+import { PostgresUserService } from "./user.service.js";
 
 export class WalletTransferService {
   // Cache for contract instances to avoid recreating them

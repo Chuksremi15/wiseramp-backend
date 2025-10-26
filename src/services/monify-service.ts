@@ -1,7 +1,6 @@
 import monifyAxios from "../services/monify-axios.service.js";
 import { PostgresUserService } from "./user.service.js";
 import { generateMonifyReference } from "../utils/reference-generator.js";
-import type { User } from "../db/schema.js";
 
 const CONTRACT_CODE = "6525620582";
 const MONIFY_VAULT_ACCOUNT = "5782214614";
