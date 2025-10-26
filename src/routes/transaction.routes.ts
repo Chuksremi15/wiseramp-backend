@@ -16,11 +16,11 @@ router.post("/fiat-to-crypto", authenticateJWT, createFiatToCryptoTransaction);
 
 router.post("/crypto-to-fiat", authenticateJWT, createCryptoToFiatTransaction);
 
-router.post(
-  "/crypto-to-crypto",
-  authenticateJWT,
-  createCryptoToCryptoTransaction
-);
+// router.post(
+//   "/crypto-to-crypto",
+//   authenticateJWT,
+//   createCryptoToCryptoTransaction
+// );
 
 router.get("/user", authenticateJWT, getUserTransactions);
 

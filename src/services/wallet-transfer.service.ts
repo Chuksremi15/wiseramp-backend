@@ -1,4 +1,5 @@
 import { ethers } from "ethers";
+import axios from "axios";
 import { TokenConfigUtils } from "../utils/token-config";
 import { deployedContracts } from "../abis/wallet-factory";
 import { PostgresUserService } from "./user.service";
@@ -831,6 +832,178 @@ export class WalletTransferService {
         error: `Failed to check ${tokenSymbol} balance: ${
           error instanceof Error ? error.message : error
         }`,
+      };
+    }
+  }
+
+  /**
+   * Swap tokens using 0x API
+   */
+  static async swapTokens({
+    chainName,
+    sellTokenSymbol,
+    buyTokenSymbol,
+    sellAmount,
+    recipientAddress,
+  }: {
+    chainName: string;
+    sellTokenSymbol: string;
+    buyTokenSymbol: string;
+    sellAmount: string;
+    recipientAddress: string;
+  }): Promise<{
+    success: boolean;
+    txHash?: string;
+    transferFee?: string;
+    error?: string;
+  }> {
+    try {
+      if (!process.env.VAULT_PRIVATE_KEY) {
+        return {
+          success: false,
+          error: "Vault private key not found in environment",
+        };
+      }
+
+      if (!process.env.ZERO_EX_API_KEY) {
+        return {
+          success: false,
+          error: "0x API key not found in environment",
+        };
+      }
+
+      const provider = this.getProvider(chainName);
+      const vaultWallet = new ethers.Wallet(
+        process.env.VAULT_PRIVATE_KEY,
+        provider
+      );
+
+      // Get token information
+      const sellTokenInfo = TokenConfigUtils.getTokenInfo(
+        chainName,
+        sellTokenSymbol
+      );
+      const buyTokenInfo = TokenConfigUtils.getTokenInfo(
+        chainName,
+        buyTokenSymbol
+      );
+
+      if (!sellTokenInfo || !buyTokenInfo) {
+        return {
+          success: false,
+          error: `Token information not found for ${sellTokenSymbol} or ${buyTokenSymbol} on ${chainName}`,
+        };
+      }
+
+      // Setup 0x API client
+      const zeroExApi = axios.create({
+        baseURL: "https://api.0x.org/",
+        headers: {
+          "0x-api-key": process.env.ZERO_EX_API_KEY,
+          "0x-version": "v2",
+        },
+      });
+
+      // ERC20 ABI for allowance and approve
+      const ERC20_ABI = [
+        "function allowance(address owner, address spender) view returns (uint256)",
+        "function approve(address spender, uint256 amount) returns (bool)",
+      ];
+
+      console.log(`Backend Wallet Address: ${vaultWallet.address}`);
+
+      // Parse sell amount with proper decimals
+      const sellAmountInWei = ethers.parseUnits(
+        sellAmount,
+        sellTokenInfo.decimals
+      );
+
+      console.log(
+        `Attempting to swap ${sellAmount} ${sellTokenSymbol} for ${buyTokenSymbol}...`
+      );
+
+      // Get a quote from 0x API
+      const quoteResponse = await zeroExApi.get(
+        "/swap/allowance-holder/quote",
+        {
+          params: {
+            chainId: 8453,
+            sellToken: sellTokenInfo.address,
+            buyToken: buyTokenInfo.address,
+            sellAmount: sellAmountInWei.toString(),
+            taker: vaultWallet.address,
+            recipient: recipientAddress,
+          },
+        }
+      );
+
+      const quote = quoteResponse.data;
+
+      // Check and set token allowance
+      const spender = quote.allowanceTarget;
+      const sellTokenContract = new ethers.Contract(
+        sellTokenInfo.address,
+        ERC20_ABI,
+        vaultWallet
+      );
+
+      console.log(`Checking allowance for spender: ${spender}...`);
+
+      // Check current allowance
+      const currentAllowance = await sellTokenContract.allowance(
+        vaultWallet.address,
+        spender
+      );
+
+      if (currentAllowance < BigInt(sellAmountInWei)) {
+        console.log("Allowance is too low. Sending approve transaction...");
+
+        const approveTx = await sellTokenContract.approve(
+          spender,
+          sellAmountInWei
+        );
+
+        console.log(`Approve Tx sent: ${approveTx.hash}`);
+        console.log("Waiting for approval confirmation...");
+        await approveTx.wait();
+        console.log("--- APPROVAL SUCCESSFUL! ---");
+      } else {
+        console.log("Allowance is sufficient. No approval needed.");
+      }
+
+      // Send the swap transaction
+      console.log("Sending swap transaction...");
+
+      const swapTx = await vaultWallet.sendTransaction(quote.transaction);
+
+      console.log(`Transaction sent! Hash: ${swapTx.hash}`);
+      console.log(`Waiting for confirmation...`);
+
+      // Wait for the transaction to be mined
+      const receipt = await swapTx.wait();
+
+      console.log("--- SWAP SUCCESSFUL! ---");
+      console.log(
+        `View on ${chainName} Etherscan: https://${
+          chainName === "mainnet" ? "" : "sepolia."
+        }etherscan.io/tx/${swapTx.hash}`
+      );
+
+      return {
+        success: true,
+        txHash: swapTx.hash,
+        transferFee: receipt
+          ? ethers.formatEther(receipt.gasUsed * receipt.gasPrice)
+          : undefined,
+      };
+    } catch (error) {
+      console.error(
+        `[TOKEN_SWAP] Failed to swap ${sellTokenSymbol} for ${buyTokenSymbol}:`,
+        error instanceof Error ? error.message : error
+      );
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
       };
     }
   }

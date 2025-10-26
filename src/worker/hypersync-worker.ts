@@ -615,15 +615,61 @@ export class HypersyncWorker {
       console.log("[To: ]", to);
       console.log("[Amount:]", amountReceive);
 
+      await this.processTransactionMatch(
+        chainName,
+        to,
+        amountReceive,
+        log.hash,
+        log.transactionHash,
+        "Token"
+      );
+    } catch (error) {
+      console.error(`[${chainName}] Error processing token transfer:`, error);
+      // Don't re-throw to prevent worker from crashing
+    }
+  }
+
+  private async processEthTransaction(tx: any, chainName: string) {
+    // Process ETH transaction
+    if (tx.from && tx.to && tx.value !== undefined && tx.value !== "0x0") {
+      console.log(
+        `[${chainName}] ETH transaction detected: ${tx.hash} (${tx.value} wei)`
+      );
+
+      const amountReceive = BigInt(tx.value);
+      await this.processTransactionMatch(
+        chainName,
+        tx.to,
+        amountReceive,
+        tx.hash,
+        tx.hash,
+        "ETH"
+      );
+    }
+  }
+
+  /**
+   * Reusable method to process transaction matching and confirmation
+   * Used for both token transfers and ETH transfers
+   */
+  private async processTransactionMatch(
+    chainName: string,
+    recipientAddress: string,
+    amountReceived: bigint,
+    logHash: string,
+    transactionHash: string,
+    transferType: "Token" | "ETH"
+  ): Promise<void> {
+    try {
       const pendingTransactions =
         await this.getTransactionService().getPendingTransactionsByChainAndAddress(
           chainName,
-          to.toLowerCase()
+          recipientAddress.toLowerCase()
         );
 
       if (pendingTransactions.length === 0) {
         console.log(
-          `[${chainName}] No pending transactions found for address ${to}.`
+          `[${chainName}] No pending transactions found for address ${recipientAddress}.`
         );
         return;
       }
@@ -632,12 +678,41 @@ export class HypersyncWorker {
 
       for (const transaction of pendingTransactions) {
         // Convert source amount to wei for precise comparison
-        const sourceAmountInWei = ethers.parseEther(transaction.sourceAmount);
 
-        if (amountReceive >= sourceAmountInWei) {
+        let sourceAmountInWei;
+
+        if (transaction.sourceCurrency.toLocaleLowerCase() !== "eth") {
+          const tokenInfo = TokenConfigUtils.getTokenInfo(
+            chainName,
+            transaction.sourceCurrency
+          );
+
+          if (!tokenInfo) {
+            console.log(
+              `[${chainName}] Stablecoin ${transaction.sourceCurrency} not supported on ${chainName}`
+            );
+            return;
+          }
+
+          const truncatedAmount = parseFloat(transaction.sourceAmount).toFixed(
+            tokenInfo.decimals
+          );
+          sourceAmountInWei = ethers.parseUnits(
+            truncatedAmount,
+            tokenInfo.decimals
+          );
+        } else {
+          sourceAmountInWei = ethers.parseEther(transaction.sourceAmount);
+        }
+
+        if (amountReceived >= sourceAmountInWei) {
           matchedTransaction = transaction;
           console.log(
-            `[${chainName}] Matched transaction ${transaction.transactionId} with amount ${transaction.sourceAmount} ETH`
+            `[${chainName}] Matched transaction ${
+              transaction.transactionId
+            } with amount ${transaction.sourceAmount} ${
+              transferType === "ETH" ? "ETH" : "tokens"
+            }`
           );
           break;
         }
@@ -654,7 +729,7 @@ export class HypersyncWorker {
       await this.getTransactionService().updateCryptoStatus(
         matchedTransaction.id,
         TransactionStatus.CRYPTO_CONFIRMED,
-        log.hash
+        logHash
       );
 
       const confirmationResult =
@@ -670,24 +745,20 @@ export class HypersyncWorker {
         // Transaction status will be updated by the confirmation service
       }
 
-      await this.removeAddressIfNoActiveTransactions(to, chainName);
+      await this.removeAddressIfNoActiveTransactions(
+        recipientAddress,
+        chainName
+      );
 
       console.log(
-        `[${chainName}] Token transfer detected: ${log.transactionHash}`
+        `[${chainName}] ${transferType} transfer detected: ${transactionHash}`
       );
     } catch (error) {
-      console.error(`[${chainName}] Error processing token transfer:`, error);
-      // Don't re-throw to prevent worker from crashing
-    }
-  }
-
-  private async processEthTransaction(tx: any, chainName: string) {
-    // Process ETH transaction
-    if (tx.from && tx.to && tx.value !== undefined && tx.value !== "0x0") {
-      console.log(
-        `[${chainName}] ETH transaction detected: ${tx.hash} (${tx.value} wei)`
+      console.error(
+        `[${chainName}] Error processing ${transferType} transaction match:`,
+        error
       );
-      // TODO: Add actual transaction processing logic here
+      // Don't re-throw to prevent worker from crashing
     }
   }
 
