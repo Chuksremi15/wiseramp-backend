@@ -53,6 +53,12 @@ export const CHAIN_TOKEN_CONFIG: Record<string, ChainConfig> = {
         decimals: 6,
         name: "USD Coin (Testnet)",
       },
+      PYUSD: {
+        symbol: "PYUSD",
+        address: "0xCaC524BcA292aaade2DF8A05cC58F0a65B1B3bB9".toLowerCase(),
+        decimals: 6,
+        name: "PayPal USD (Sepolia)",
+      },
       WETH: {
         symbol: "WETH",
         address: "0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9",

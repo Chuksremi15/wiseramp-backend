@@ -549,7 +549,7 @@ export class WalletTransferService {
   }> {
     try {
       // Define stablecoins
-      const stablecoins = ["USDT", "USDC", "DAI", "BUSD"];
+      const stablecoins = ["USDT", "USDC", "PYUSD", "DAI", "BUSD"];
 
       // Check if token is a stablecoin
       if (stablecoins.includes(tokenSymbol.toUpperCase())) {

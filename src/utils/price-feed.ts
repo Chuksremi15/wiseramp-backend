@@ -18,14 +18,10 @@ const aggregatorV3InterfaceABI = [
 // Mainnet price feed addresses as an object
 export const PRICE_FEEDS = {
   ETH: "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419",
-  BTC: "0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c",
   USDC: "0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6",
-  BNB: "0x14e613AC84a31f709eadbdF89C6CC390fDc9540A",
-  ADA: "0xAE48c91dF1fE419994FFDa27da09D5aC69c30f55",
-  DOGE: "0x2465CefD3b488BE410b941b1d4b2767088e2A028",
-  SOL: "0x4ffC43a60e009B551865A93d232E33Fce9f01507",
+  PYUSD: "0x8f1dF6D7F2db73eECE86a18b4381F4707b918FB1",
   NGN: "0xdfbb5Cbc88E382de007bfe6CE99C388176ED80aD",
-};
+} as const;
 
 // Token-to-provider mapping for tokens that need specific providers
 const TOKEN_PROVIDERS: Record<string, JsonRpcProvider> = {
